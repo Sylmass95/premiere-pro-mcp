@@ -1226,8 +1226,12 @@ export function getExportTools(bridgeOptions: BridgeOptions) {
             error: "preset_path is required. Pass a .epr file; omitting it falls through to an Illegal Parameter error on this host.",
           };
         }
+        // QE/AME choke on forward-slash paths here with "Unknown error exception"
+        // (#711): resolve both to native separators before embedding them.
+        const resolvedOutputPath = resolve(args.output_path);
+        const resolvedPresetPath = resolve(args.preset_path);
         try {
-          inspectExportPresetFile(args.preset_path);
+          inspectExportPresetFile(resolvedPresetPath);
         } catch (error) {
           return { success: false, error: error instanceof Error ? error.message : String(error) };
         }
@@ -1245,12 +1249,12 @@ export function getExportTools(bridgeOptions: BridgeOptions) {
           
           encoder.launchEncoder();
           
-          var outputFile = new File("${escapeForExtendScript(args.output_path)}");
+          var outputFile = new File("${escapeForExtendScript(resolvedOutputPath)}");
           if (!outputFile.parent || !outputFile.parent.exists) {
             return __error("The requested AME output directory does not exist: " + outputFile.parent);
           }
           var outputPath = outputFile.fsName;
-          var presetPath = "${escapeForExtendScript(args.preset_path)}";
+          var presetPath = "${escapeForExtendScript(resolvedPresetPath)}";
           
           var jobId = encoder.encodeSequence(
             seq,

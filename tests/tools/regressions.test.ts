@@ -1,9 +1,9 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve, sep } from "node:path";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { runInNewContext } from "node:vm";
-import { getHelpersSource } from "../../src/bridge/script-builder.js";
+import { escapeForExtendScript, getHelpersSource } from "../../src/bridge/script-builder.js";
 import { BridgeOptions } from "../../src/bridge/file-bridge.js";
 
 vi.mock("../../src/bridge/file-bridge.js", () => ({
@@ -81,6 +81,24 @@ async function executePixelAspectRatioScript(sequence: unknown, ratio = "1.4222"
 beforeEach(() => vi.clearAllMocks());
 
 describe("real-host social sequence regressions", () => {
+  // #691: QE's newSequence silently ignores forward-slash preset paths on
+  // Windows, so the handler must hand the host native separators and give a
+  // missing file its own precise error.
+  it("normalizes forward-slash preset_path to native separators before the QE call", async () => {
+    const realFile = join(process.cwd(), "package.json");
+    const forwardSlashed = realFile.split(sep).join("/");
+    const script = await scriptFor(sequence.create_sequence_from_preset, { name: "PresetPathTest", preset_path: forwardSlashed });
+    expect(script).toContain(escapeForExtendScript(resolve(forwardSlashed)));
+    expect(script).not.toContain("" + escapeForExtendScript(forwardSlashed) + "");
+  });
+
+  it("reports a missing preset file precisely instead of a bare QE failure", async () => {
+    await expect(sequence.create_sequence_from_preset.handler({
+      name: "PresetPathTest",
+      preset_path: join(process.cwd(), "no-such-dir", "no-such-preset.sqpreset"),
+    })).resolves.toMatchObject({ success: false, error: expect.stringContaining("Preset file not found") });
+  });
+
   const sequence = getSequenceTools(bridgeOptions);
   const playhead = getPlayheadTools(bridgeOptions);
   const utility = getUtilityTools(bridgeOptions);

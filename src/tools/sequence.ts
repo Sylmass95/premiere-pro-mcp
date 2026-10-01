@@ -1,7 +1,7 @@
 import { buildToolScript, escapeForExtendScript } from "../bridge/script-builder.js";
 import { sendCommand, BridgeOptions } from "../bridge/file-bridge.js";
 import { existsSync, readdirSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 /**
  * Find a default .sqpreset on this machine for create_sequence without preset_path.
@@ -700,12 +700,21 @@ export function getSequenceTools(bridgeOptions: BridgeOptions) {
       },
       handler: async (args: { name: string; preset_path: string }) => {
         // createNewSequenceFromPreset is not a real API (missing in 26.x) — use QE.
+        // QE's newSequence silently ignores forward-slash preset paths on Windows
+        // (#691): the call does not throw but the previous sequence stays active,
+        // so the name check below would report a bare "Failed to create" error.
+        // resolve() normalizes to native separators; a missing file gets its own
+        // precise error instead of leaking into the generic one.
+        const presetPath = resolve(args.preset_path);
+        if (!existsSync(presetPath)) {
+          return { success: false as const, error: `Preset file not found: ${presetPath}` };
+        }
         const script = buildToolScript(`
           app.enableQE();
-          qe.project.newSequence("${escapeForExtendScript(args.name)}", "${escapeForExtendScript(args.preset_path)}");
+          qe.project.newSequence("${escapeForExtendScript(args.name)}", "${escapeForExtendScript(presetPath)}");
           var seq = app.project.activeSequence;
           if (!seq || seq.name !== "${escapeForExtendScript(args.name)}") {
-            return __error("Failed to create sequence from preset: ${escapeForExtendScript(args.preset_path)}");
+            return __error("Failed to create sequence from preset: ${escapeForExtendScript(presetPath)}");
           }
           return __result({ created: true, name: seq.name, id: seq.sequenceID });
         `);

@@ -1061,7 +1061,11 @@ describe("issue #238 — AME uses canonical paths and documented encodeFile posi
 
     expect(queued).toContain("var outputFile = new File");
     expect(queued).toContain("var jobId = encoder.encodeSequence");
-    expect(queued).toContain("Queue presence and output-file creation are not verified");
+    // The receipt must never present queueing as a completed encode (#238),
+    // and on 26.5.2 the AME queue does not auto-start, so the script must
+    // start the batch after queuing (#687 live observation).
+    expect(queued).toContain("Output-file creation is not verified by this tool");
+    expect(queued).toContain("app.encoder.startBatch()");
     expect(projectItem).toContain("outputFile.fsName");
     expect(projectItem).toContain("var jobId = app.encoder.encodeProjectItem");
   });

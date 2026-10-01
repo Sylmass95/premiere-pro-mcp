@@ -1261,6 +1261,18 @@ export function getExportTools(bridgeOptions: BridgeOptions) {
           );
           if (!jobId || String(jobId) === "0") return __error("Adobe Media Encoder did not queue the sequence export.");
           
+          // On Premiere 26.5.2 the queued job sits in AME's queue as "Ready"
+          // and never processes until someone presses the queue play button
+          // (observed live; see upstream #687). app.encoder.startBatch() is
+          // the documented CEP way to start the queue batch (#641/#323).
+          var batchStarted = "";
+          try {
+            app.encoder.startBatch();
+            batchStarted = "started";
+          } catch (startBatchError) {
+            batchStarted = "unavailable: " + (startBatchError && startBatchError.message ? startBatchError.message : startBatchError);
+          }
+          
           return __result({
             accepted: true,
             verified: false,
@@ -1268,7 +1280,8 @@ export function getExportTools(bridgeOptions: BridgeOptions) {
             jobId: String(jobId),
             outputPath: outputPath,
             savedProjectPath: savedProjectPath,
-            verificationScope: "Premiere returned an AME job ID. Queue presence and output-file creation are not verified by this tool."
+            queueBatchStart: batchStarted,
+            verificationScope: "Premiere returned an AME job ID and the queue batch was started. Output-file creation is not verified by this tool."
           });
         `);
         return sendCommand(script, bridgeOptions);

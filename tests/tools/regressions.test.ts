@@ -304,13 +304,14 @@ describe("PR #3 follow-ups — color_correct and export_sequence", () => {
   // #712: trim_clip and slip_edit must refuse source windows past the media's
   // own end (Premiere would otherwise extend the clip over nonexistent frames
   // and report verified: true).
-  it("trim_clip and slip_edit scripts carry the media-end guard", async () => {
-    const trim = await scriptFor(getTimelineTools(bridgeOptions).trim_clip, { node_id: "clip-1", new_out_seconds: 39 });
-    expect(trim).toContain("projectItem.getOutPoint()");
-    expect(trim).toContain("exceeds this clip's media end");
-    const slip = await scriptFor(getAdvancedTools(bridgeOptions).slip_edit, { node_id: "clip-1", offset_seconds: 2 });
-    expect(slip).toContain("projectItem.getOutPoint()");
-    expect(slip).toContain("past this clip's media end");
+  it("trim_clip and slip_edit scripts carry the ffprobe media-duration guard", async () => {
+    vi.mocked(sendCommand).mockResolvedValueOnce({ success: true, data: { mediaPath: "C:/media/clip.mp4" } } as never);
+    const trim = await scriptFor(getTimelineTools(bridgeOptions, { probeMediaDurationSeconds: async () => 5 }).trim_clip, { node_id: "clip-1", new_out_seconds: 39 });
+    expect(trim).not.toContain("projectItem.getOutPoint()");
+    expect(trim).toContain("real media duration of 5.000s (ffprobe)");
+    vi.mocked(sendCommand).mockResolvedValueOnce({ success: true, data: { mediaPath: "C:/media/clip.mp4" } } as never);
+    const slip = await scriptFor(getAdvancedTools(bridgeOptions, { probeMediaDurationSeconds: async () => 10 }).slip_edit, { node_id: "clip-1", offset_seconds: 2 });
+    expect(slip).toContain("past this clip's real media duration of 10.000s (ffprobe)");
   });
 
 

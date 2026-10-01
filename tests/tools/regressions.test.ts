@@ -92,6 +92,12 @@ describe("real-host social sequence regressions", () => {
     expect(script).not.toContain("" + escapeForExtendScript(forwardSlashed) + "");
   });
 
+  it("create_sequence also normalizes preset_path and reports missing files (#714)", async () => {
+    const script = await scriptFor(sequence.create_sequence, { name: "Create714", preset_path: "C:/presets/real.sqpreset" });
+    expect(script).toContain(escapeForExtendScript("C:\presets\real.sqpreset"));
+    await expect(sequence.create_sequence.handler({ name: "X", preset_path: "C:/no/such.sqpreset" })).resolves.toMatchObject({ success: false, error: expect.stringContaining("Preset file not found") });
+  });
+
   it("reports a missing preset file precisely instead of a bare QE failure", async () => {
     await expect(sequence.create_sequence_from_preset.handler({
       name: "PresetPathTest",
@@ -1247,7 +1253,7 @@ describe("issue #326 — sequence creation requires project-collection readback"
 
   it("does not report a QE-active sequence as created unless it is discoverable", async () => {
     const script = await scriptFor(sequence.create_sequence, {
-      name: "Verified Sequence", preset_path: "/tmp/sequence.sqpreset",
+      name: "Verified Sequence", preset_path: join(process.cwd(), "package.json"),
     });
     expect(script).toContain("var beforeSequenceIds = {}");
     expect(script).toContain("var sequenceId = String(seq.sequenceID)");

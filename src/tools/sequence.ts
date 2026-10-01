@@ -99,6 +99,13 @@ export function getSequenceTools(bridgeOptions: BridgeOptions) {
               "creating a sequence without a preset opens a modal dialog in Premiere 26+, which would freeze scripting.",
           };
         }
+        // QE's newSequence silently ignores forward-slash preset paths on Windows
+        // (#714, same root cause as #691): resolve to native separators, and give
+        // a missing file its own precise error instead of the bare QE failure.
+        const resolvedPresetPath = resolve(presetPath);
+        if (!existsSync(resolvedPresetPath)) {
+          return { success: false as const, error: `Preset file not found: ${resolvedPresetPath}` };
+        }
 
         const script = buildToolScript(`
           var beforeSequenceIds = {};
@@ -106,7 +113,7 @@ export function getSequenceTools(bridgeOptions: BridgeOptions) {
             beforeSequenceIds[String(app.project.sequences[i].sequenceID)] = true;
           }
           app.enableQE();
-          qe.project.newSequence("${escapeForExtendScript(args.name)}", "${escapeForExtendScript(presetPath)}");
+          qe.project.newSequence("${escapeForExtendScript(args.name)}", "${escapeForExtendScript(resolvedPresetPath)}");
           var seq = app.project.activeSequence;
           if (!seq || seq.name !== "${escapeForExtendScript(args.name)}") {
             return __error("Failed to create sequence from preset: ${escapeForExtendScript(presetPath)}");

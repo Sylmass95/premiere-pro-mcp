@@ -301,6 +301,19 @@ describe("issue #9 — frame export uses the QE DOM and verifies the file landed
 
 // Defects found while reviewing PR #3 (repair 6 broken tools on Premiere Pro 2026).
 describe("PR #3 follow-ups — color_correct and export_sequence", () => {
+  // #712: trim_clip and slip_edit must refuse source windows past the media's
+  // own end (Premiere would otherwise extend the clip over nonexistent frames
+  // and report verified: true).
+  it("trim_clip and slip_edit scripts carry the media-end guard", async () => {
+    const trim = await scriptFor(getTimelineTools(bridgeOptions).trim_clip, { node_id: "clip-1", new_out_seconds: 39 });
+    expect(trim).toContain("projectItem.getOutPoint()");
+    expect(trim).toContain("exceeds this clip's media end");
+    const slip = await scriptFor(getAdvancedTools(bridgeOptions).slip_edit, { node_id: "clip-1", offset_seconds: 2 });
+    expect(slip).toContain("projectItem.getOutPoint()");
+    expect(slip).toContain("past this clip's media end");
+  });
+
+
   const effects = getEffectsTools(bridgeOptions);
   const exportTools = getExportTools(bridgeOptions);
 
@@ -356,6 +369,9 @@ describe("PR #3 follow-ups — color_correct and export_sequence", () => {
 
   it("treats a missing or unchanged export file as failure, not success", async () => {
     const advanced = getAdvancedTools(bridgeOptions);
+
+
+
     const projectScript = await scriptFor(advanced.export_as_project, { output_path: "/tmp/export.prproj" });
     const xmlScript = await scriptFor(exportTools.export_as_fcp_xml, { output_path: "/tmp/export.xml" });
     const sequenceScript = await scriptFor(exportTools.export_sequence, {

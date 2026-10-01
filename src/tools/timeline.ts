@@ -513,6 +513,17 @@ export function getTimelineTools(bridgeOptions: BridgeOptions) {
             if (targetIn < 0) {
               return __editFail("The trim would move this clip's source in point to " + targetIn + "s, before the start of its media; trim was not attempted.");
             }
+            // A source out point past the media's own end leaves the clip
+            // referencing frames that do not exist (#712): refuse against the
+            // project item's media out point before anything is written.
+            var mediaEndSeconds = null;
+            try {
+              var mediaOut = clip.projectItem.getOutPoint();
+              if (mediaOut && isFinite(mediaOut.seconds)) mediaEndSeconds = mediaOut.seconds;
+            } catch (mediaOutError) {}
+            if (mediaEndSeconds !== null && targetOut > mediaEndSeconds + tolerance) {
+              return __editFail("The requested source out point " + targetOut + "s exceeds this clip's media end of " + mediaEndSeconds + "s; trim was not attempted. Premiere would otherwise extend the clip past its available media.");
+            }
             if (targetOut - targetIn < tolerance) {
               return __editFail("The requested source trim must leave at least one frame between in and out; trim was not attempted.");
             }

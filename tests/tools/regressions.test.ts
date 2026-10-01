@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { runInNewContext } from "node:vm";
-import { getHelpersSource } from "../../src/bridge/script-builder.js";
+import { escapeForExtendScript, getHelpersSource } from "../../src/bridge/script-builder.js";
 import { BridgeOptions } from "../../src/bridge/file-bridge.js";
 
 vi.mock("../../src/bridge/file-bridge.js", () => ({
@@ -1390,5 +1390,33 @@ describe("sequence settings setters verify their readback", () => {
     await expect(utility.set_sequence_field_type.handler({ field_type: 7 })).resolves.toMatchObject({ success: false });
     await expect(utility.set_sequence_display_format.handler({})).resolves.toMatchObject({ success: false });
     expect(mockedSendCommand).not.toHaveBeenCalled();
+  });
+});
+
+describe("#712 rework: media bound from real ffprobe duration (owner review)", () => {
+  it("the media bound comes from ffprobe duration, not the editable source Out mark", async () => {
+    vi.mocked(sendCommand).mockResolvedValueOnce({ success: true, data: { mediaPath: "C:/media/clip.mp4" } } as never);
+    const tools = getTimelineTools(bridgeOptions, { probeMediaDurationSeconds: async () => 10 });
+    await tools.trim_clip.handler({ node_id: "clip-1", new_out_seconds: 15 });
+    const script = mockedSendCommand.mock.calls.at(-1)[0] as string;
+    expect(script).toContain("targetOut > 10.000 + tolerance");
+    expect(script).toContain('real media duration of 10.000s (ffprobe)');
+    expect(script).not.toContain("projectItem.getOutPoint()");
+  });
+
+  it("still images (no duration evidence) keep no upper source bound", async () => {
+    vi.mocked(sendCommand).mockResolvedValueOnce({ success: true, data: { mediaPath: "C:/media/still.png" } } as never);
+    const tools = getTimelineTools(bridgeOptions, { probeMediaDurationSeconds: async () => null });
+    await tools.trim_clip.handler({ node_id: "clip-1", new_out_seconds: 15 });
+    const script = mockedSendCommand.mock.calls.at(-1)[0] as string;
+    expect(script).toContain("No media-duration evidence available");
+  });
+
+  it("slip_edit carries the same ffprobe-evidence bound", async () => {
+    vi.mocked(sendCommand).mockResolvedValueOnce({ success: true, data: { mediaPath: "C:/media/clip.mp4" } } as never);
+    const tools = getAdvancedTools(bridgeOptions, { probeMediaDurationSeconds: async () => 10 });
+    await tools.slip_edit.handler({ node_id: "clip-1", offset_seconds: 2 });
+    const script = mockedSendCommand.mock.calls.at(-1)[0] as string;
+    expect(script).toContain("past this clip's real media duration of 10.000s (ffprobe)");
   });
 });

@@ -1,3 +1,4 @@
+import { probeMediaDurationSeconds } from "./media-evidence.js";
 import { rippleDeleteScriptBody } from "./ripple-delete-script.js";
 import { buildToolScript, escapeForExtendScript } from "../bridge/script-builder.js";
 import { sendCommand, BridgeOptions } from "../bridge/file-bridge.js";
@@ -74,7 +75,12 @@ const KEYFRAME_SCAN_HELPERS = `
           }
 `;
 
-export function getTimelineTools(bridgeOptions: BridgeOptions) {
+export function getTimelineTools(
+  bridgeOptions: BridgeOptions,
+  dependencies: { probeMediaDurationSeconds?: (path: string) => Promise<number | null> } = {},
+) {
+  // SEC FORK (#712): injectable for tests; defaults to real ffprobe evidence.
+  const probeMediaDuration = dependencies.probeMediaDurationSeconds ?? probeMediaDurationSeconds;
   return {
     add_to_timeline: {
       description:
@@ -446,6 +452,37 @@ export function getTimelineTools(bridgeOptions: BridgeOptions) {
           };
         }
 
+        // SEC FORK (#712 review): the media-duration bound uses REAL evidence —
+        // ffprobe on the clip's media file — not ProjectItem.getOutPoint(),
+        // which is an editable source Out mark. Two phases: read the media
+        // path, probe duration Node-side, then embed an exact bound. No
+        // evidence (still image, unreadable file): no upper bound, as stills
+        // are legitimately extendable.
+        const evidenceScript = buildToolScript(`
+          var result = __findClip("${escapeForExtendScript(args.node_id)}");
+          if (!result) return __error("Clip not found");
+          var mp = "";
+          try { mp = String(result.clip.projectItem.getMediaPath() || ""); } catch (eMediaPath) {}
+          return __result({ mediaPath: mp });
+        `);
+        let mediaDurationSeconds: number | null = null;
+        try {
+          const evidence = await sendCommand(evidenceScript, bridgeOptions);
+          const evidenceData = (evidence as { data?: { mediaPath?: unknown } } | undefined)?.data;
+          const mediaPath = typeof evidenceData?.mediaPath === "string" ? evidenceData.mediaPath : "";
+          mediaDurationSeconds = mediaPath ? await probeMediaDuration(mediaPath) : null;
+        } catch {
+          mediaDurationSeconds = null;
+        }
+        // SEC FORK (#712): the whole bound line is resolved Node-side (numbers
+        // embedded) so the generated script never references Node variables.
+        const trimMediaBound = mediaDurationSeconds !== null
+          ? `
+            if (targetOut > ${mediaDurationSeconds.toFixed(3)} + tolerance) {
+              return __editFail("The requested source out point " + targetOut + "s exceeds this clip's real media duration of ${mediaDurationSeconds.toFixed(3)}s (ffprobe); trim was not attempted. Premiere would otherwise extend the clip past its available media.");
+            }`
+          : "\n            // No media-duration evidence available (still image or unreadable file): no upper source bound applied.";
+
         const script = buildToolScript(`
           function __editOne(result, nodeId, checkOnly) {
 
@@ -513,17 +550,9 @@ export function getTimelineTools(bridgeOptions: BridgeOptions) {
             if (targetIn < 0) {
               return __editFail("The trim would move this clip's source in point to " + targetIn + "s, before the start of its media; trim was not attempted.");
             }
-            // A source out point past the media's own end leaves the clip
-            // referencing frames that do not exist (#712): refuse against the
-            // project item's media out point before anything is written.
-            var mediaEndSeconds = null;
-            try {
-              var mediaOut = clip.projectItem.getOutPoint();
-              if (mediaOut && isFinite(mediaOut.seconds)) mediaEndSeconds = mediaOut.seconds;
-            } catch (mediaOutError) {}
-            if (mediaEndSeconds !== null && targetOut > mediaEndSeconds + tolerance) {
-              return __editFail("The requested source out point " + targetOut + "s exceeds this clip's media end of " + mediaEndSeconds + "s; trim was not attempted. Premiere would otherwise extend the clip past its available media.");
-            }
+            // SEC FORK (#712): upper bound from REAL media duration (ffprobe,
+            // probed Node-side and embedded exactly), never from the editable
+            // source Out mark. Skipped when no evidence exists (stills).${trimMediaBound}
             if (targetOut - targetIn < tolerance) {
               return __editFail("The requested source trim must leave at least one frame between in and out; trim was not attempted.");
             }

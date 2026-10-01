@@ -5,9 +5,15 @@ import {
 import { sendCommand, BridgeOptions } from "../bridge/file-bridge.js";
 import { compareMogrtText, extractMogrtText, summarizeMogrtText, validateMogrtTextMap } from "./mogrt-text.js";
 import { SPEED_UNAVAILABLE_DESCRIPTION, SPEED_UNAVAILABLE_ERROR } from "./timeline.js";
+import { probeMediaDurationSeconds } from "./media-evidence.js";
 import { rippleDeleteScriptBody } from "./ripple-delete-script.js";
 
-export function getAdvancedTools(bridgeOptions: BridgeOptions) {
+export function getAdvancedTools(
+  bridgeOptions: BridgeOptions,
+  dependencies: { probeMediaDurationSeconds?: (path: string) => Promise<number | null> } = {},
+) {
+  // SEC FORK (#712): injectable for tests; defaults to real ffprobe evidence.
+  const probeMediaDuration = dependencies.probeMediaDurationSeconds ?? probeMediaDurationSeconds;
   return {
     ripple_delete: {
       description:
@@ -80,6 +86,7 @@ export function getAdvancedTools(bridgeOptions: BridgeOptions) {
         if (!Number.isFinite(args.offset_seconds) || args.offset_seconds === 0) {
           return { success: false, error: "offset_seconds must be a finite, non-zero number" };
         }
+
         const script = buildToolScript(`
           function __editOne(result, nodeId, checkOnly) {
             var track = result.trackType === "video"
@@ -284,6 +291,34 @@ export function getAdvancedTools(bridgeOptions: BridgeOptions) {
         if (!Number.isFinite(args.offset_seconds) || args.offset_seconds === 0) {
           return { success: false, error: "offset_seconds must be a finite, non-zero number" };
         }
+        // SEC FORK (#712 review): slip bound uses REAL media duration (ffprobe
+        // on the clip's media file), never the editable source Out mark. Two
+        // phases like trim_clip; no evidence = no upper bound (stills).
+        const evidenceScript = buildToolScript(`
+          var result = __findClip("${escapeForExtendScript(args.node_id)}");
+          if (!result) return __error("Clip not found");
+          var mp = "";
+          try { mp = String(result.clip.projectItem.getMediaPath() || ""); } catch (eMediaPath) {}
+          return __result({ mediaPath: mp });
+        `);
+        let mediaDurationTicks: number | null = null;
+        try {
+          const evidence = await sendCommand(evidenceScript, bridgeOptions);
+          const evidenceData = (evidence as { data?: { mediaPath?: unknown } } | undefined)?.data;
+          const mediaPath = typeof evidenceData?.mediaPath === "string" ? evidenceData.mediaPath : "";
+          const duration = mediaPath ? await probeMediaDuration(mediaPath) : null;
+          if (duration !== null) mediaDurationTicks = duration * 254016000000;
+        } catch {
+          mediaDurationTicks = null;
+        }
+        // SEC FORK (#712): the whole bound line is resolved Node-side (numbers
+        // embedded) so the generated script never references Node variables.
+        const slipMediaBound = mediaDurationTicks !== null
+          ? `
+            if (newOutTicks > ${mediaDurationTicks.toFixed(0)} + 1) {
+              return __editFail("The requested slip offset would move the source out point to " + (newOutTicks / TICKS_PER_SECOND) + "s, past this clip's real media duration of ${(mediaDurationTicks / 254016000000).toFixed(3)}s (ffprobe); slip was not attempted.");
+            }`
+          : "\n            // No media-duration evidence available (still image or unreadable file): no upper source bound applied.";
         const script = buildToolScript(`
           function __editOne(result, nodeId, checkOnly) {
             var beforeStart = String(result.clip.start.ticks);
@@ -294,17 +329,8 @@ export function getAdvancedTools(bridgeOptions: BridgeOptions) {
             var newInTicks = parseFloat(beforeIn) + deltaTicks;
             var newOutTicks = parseFloat(beforeOut) + deltaTicks;
             if (newInTicks < 0 || newOutTicks <= newInTicks) return __editFail("The requested slip offset would create an invalid source range.");
-            // Slipping past the media's own end leaves the clip referencing
-            // frames that do not exist (#712): refuse against the project
-            // item's media out point before anything is written.
-            var mediaEndTicks = null;
-            try {
-              var mediaOut = result.clip.projectItem.getOutPoint();
-              if (mediaOut && isFinite(mediaOut.ticks)) mediaEndTicks = parseFloat(mediaOut.ticks);
-            } catch (mediaOutError) {}
-            if (mediaEndTicks !== null && newOutTicks > mediaEndTicks + 1) {
-              return __editFail("The requested slip offset would move the source out point to " + (newOutTicks / TICKS_PER_SECOND) + "s, past this clip's media end of " + (mediaEndTicks / TICKS_PER_SECOND) + "s; slip was not attempted.");
-            }
+            // SEC FORK (#712): upper bound from REAL media duration (ffprobe,
+            // probed Node-side and embedded exactly), never the editable mark.${slipMediaBound}
             if (checkOnly) return __editOk({ checked: true });
             var newIn = new Time();
             newIn.ticks = String(Math.round(newInTicks));
@@ -722,6 +748,11 @@ export function getAdvancedTools(bridgeOptions: BridgeOptions) {
         required: ["node_id", "new_name"],
       },
       handler: async (args: { node_id: string; new_name: string }) => {
+        // SEC FORK (#725 FAM-7): Premiere's UI refuses empty clip names; the
+        // scripting path accepted them and left the clip nameless.
+        if (!args.new_name.trim()) {
+          return { success: false as const, error: "new_name must not be empty or whitespace-only" };
+        }
         const script = buildToolScript(`
           var result = __findClip("${escapeForExtendScript(args.node_id)}");
           if (!result) return __error("Clip not found");

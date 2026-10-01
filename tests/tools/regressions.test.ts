@@ -93,8 +93,9 @@ describe("real-host social sequence regressions", () => {
   });
 
   it("create_sequence also normalizes preset_path and reports missing files (#714)", async () => {
-    const script = await scriptFor(sequence.create_sequence, { name: "Create714", preset_path: "C:/presets/real.sqpreset" });
-    expect(script).toContain(escapeForExtendScript("C:\presets\real.sqpreset"));
+    const forwardReal = join(process.cwd(), "package.json").split(sep).join("/");
+    const script = await scriptFor(sequence.create_sequence, { name: "Create714", preset_path: forwardReal });
+    expect(script).toContain(escapeForExtendScript(resolve(forwardReal)));
     await expect(sequence.create_sequence.handler({ name: "X", preset_path: "C:/no/such.sqpreset" })).resolves.toMatchObject({ success: false, error: expect.stringContaining("Preset file not found") });
   });
 

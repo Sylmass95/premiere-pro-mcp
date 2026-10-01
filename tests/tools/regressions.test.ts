@@ -57,7 +57,7 @@ async function scriptFor(tool: { handler: (args: never) => Promise<unknown> }, a
   mockedSendCommand.mockClear();
   await tool.handler(args as never);
   expect(mockedSendCommand).toHaveBeenCalled();
-  return mockedSendCommand.mock.calls[0][0] as string;
+  return mockedSendCommand.mock.calls.at(-1)[0] as string; // SEC #712: trim/slip send evidence+script
 }
 
 /**

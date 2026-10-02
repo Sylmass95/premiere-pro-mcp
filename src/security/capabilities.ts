@@ -146,6 +146,9 @@ const FILESYSTEM_TOOL_NAMES = new Set([
 // inferred safely from their names. Keep them explicit: a preview reads an
 // approved folder, authoring mutates a saved AE project and exports a file.
 const TOOL_CAPABILITY_REQUIREMENTS: Readonly<Record<string, readonly Capability[]>> = {
+  // Source bounds read the underlying media file through ffprobe.
+  trim_clip: ["edit", "filesystem"],
+  slip_edit: ["edit", "filesystem"],
   preview_after_effects_render_handoff: ["inspect", "filesystem"],
   apply_after_effects_render_handoff: ["inspect", "edit", "filesystem"],
   verify_after_effects_connection: ["inspect"],

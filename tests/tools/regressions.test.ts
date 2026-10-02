@@ -6,8 +6,10 @@ import { runInNewContext } from "node:vm";
 import { escapeForExtendScript, getHelpersSource } from "../../src/bridge/script-builder.js";
 import { BridgeOptions } from "../../src/bridge/file-bridge.js";
 
+vi.mock("../../src/tools/media-evidence.js", () => ({ probeMediaDurationSeconds: vi.fn().mockResolvedValue(3600) }));
+
 vi.mock("../../src/bridge/file-bridge.js", () => ({
-  sendCommand: vi.fn().mockResolvedValue({ success: true, data: {} }),
+  sendCommand: vi.fn().mockResolvedValue({ success: true, data: { mediaPath: "/fixture/source.mp4" } }),
   sendRawCommand: vi.fn().mockResolvedValue({ success: true, data: {} }),
   getTempDir: vi.fn().mockReturnValue("/tmp/test"),
   cleanupTempDir: vi.fn(),
@@ -80,7 +82,7 @@ async function executePixelAspectRatioScript(sequence: unknown, ratio = "1.4222"
   })));
 }
 
-beforeEach(() => vi.clearAllMocks());
+beforeEach(() => { vi.clearAllMocks(); mockedSendCommand.mockResolvedValue({ success: true, data: { mediaPath: "/fixture/source.mp4" } }); });
 
 describe("real-host social sequence regressions", () => {
   const sequence = getSequenceTools(bridgeOptions);
@@ -1521,12 +1523,11 @@ describe("#712 rework: media bound from real ffprobe duration (owner review)", (
     expect(script).not.toContain("projectItem.getOutPoint()");
   });
 
-  it("still images (no duration evidence) keep no upper source bound", async () => {
+  it("does not infer unlimited still media from an image filename when duration is unknown", async () => {
     vi.mocked(sendCommand).mockResolvedValueOnce({ success: true, data: { mediaPath: "C:/media/still.png" } } as never);
     const tools = getTimelineTools(bridgeOptions, { probeMediaDurationSeconds: async () => null });
-    await tools.trim_clip.handler({ node_id: "clip-1", new_out_seconds: 15 });
-    const script = mockedSendCommand.mock.calls.at(-1)[0] as string;
-    expect(script).toContain("No media-duration evidence available");
+    await expect(tools.trim_clip.handler({ node_id: "clip-1", new_out_seconds: 15 })).resolves.toMatchObject({ success: false, error: expect.stringContaining("Physical media duration") });
+    expect(mockedSendCommand).toHaveBeenCalledTimes(1);
   });
 
   it("slip_edit carries the same ffprobe-evidence bound", async () => {

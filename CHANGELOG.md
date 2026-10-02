@@ -22,6 +22,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- `trim_clip` and `slip_edit` now require physical media-duration evidence from ffprobe before changing source ranges, reject out-of-media edits, and refuse unknown duration or linked partners with different unprobed media. Editable project In/Out marks are not used as media boundaries (#712).
+
 - Audio volume tools now recognize Premiere's Spanish `Volumen` and `Nivel` labels and locale-independent `Internal Volume` component match names, including bulk track volume changes and `setup_ducking` (#710).
 - Legacy CEP `relink_media` now refuses by default because `changeMediaPath` can wedge Premiere on a valid file. Its explicit unsafe opt-in preflights the file and reports only `committed_unverified`; use `relink_offline_media_uxp` for capability checks and media-path/online readback (#729).
 - `apply_effect` and `apply_audio_effect` verify added components instead of trusting QE; missing readback returns `committed_unverified` with a warning to inspect the clip before retrying. An unchanged component count and undo index report `not_applied`, for example `Time Remapping`, which QE accepts but never adds. (#674)

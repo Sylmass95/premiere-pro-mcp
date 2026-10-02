@@ -10,7 +10,7 @@ const execFileAsync = promisify(execFile);
  * reject legitimate edits past a user-set mark. The only honest bound comes
  * from the media itself: probe the file with ffprobe. Returns null when there
  * is no evidence (missing file, still image, unreadable duration) so callers
- * skip the upper-bound guard instead of guessing.
+ * must refuse edits rather than infer a bound from an editable source mark.
  */
 export async function probeMediaDurationSeconds(mediaPath: string): Promise<number | null> {
   if (!mediaPath || !existsSync(mediaPath)) return null;

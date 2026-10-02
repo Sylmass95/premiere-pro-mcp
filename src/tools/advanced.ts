@@ -267,7 +267,7 @@ export function getAdvancedTools(
 
     slip_edit: {
       description:
-        "Perform a verified slip edit on a clip using public source in/out properties. Linked audio/video partners get the same edit by default (include_linked); every clip is checked before any is changed.",
+        "Perform a verified slip edit on a clip using public source in/out properties. Requires accessible physical media duration from ffprobe; unknown duration or linked partners using different source files refuse before mutation. Linked audio/video partners get the same edit by default (include_linked); every clip is checked before any is changed.",
       parameters: {
         type: "object" as const,
         properties: {
@@ -293,7 +293,7 @@ export function getAdvancedTools(
         }
         // SEC FORK (#712 review): slip bound uses REAL media duration (ffprobe
         // on the clip's media file), never the editable source Out mark. Two
-        // phases like trim_clip; no evidence = no upper bound (stills).
+        // phases like trim_clip; missing evidence refuses before mutation.
         const evidenceScript = buildToolScript(`
           var result = __findClip("${escapeForExtendScript(args.node_id)}");
           if (!result) return __error("Clip not found");
@@ -302,25 +302,31 @@ export function getAdvancedTools(
           return __result({ mediaPath: mp });
         `);
         let mediaDurationTicks: number | null = null;
+        let mediaPath = "";
         try {
           const evidence = await sendCommand(evidenceScript, bridgeOptions);
           const evidenceData = (evidence as { data?: { mediaPath?: unknown } } | undefined)?.data;
-          const mediaPath = typeof evidenceData?.mediaPath === "string" ? evidenceData.mediaPath : "";
+          mediaPath = typeof evidenceData?.mediaPath === "string" ? evidenceData.mediaPath : "";
           const duration = mediaPath ? await probeMediaDuration(mediaPath) : null;
           if (duration !== null) mediaDurationTicks = duration * 254016000000;
         } catch {
           mediaDurationTicks = null;
         }
+        if (mediaDurationTicks === null || !Number.isFinite(mediaDurationTicks) || mediaDurationTicks <= 0) {
+          return { success: false, error: "Physical media duration could not be verified. No edit was attempted. Install ffprobe and ensure the source media is accessible; editable project In/Out marks are not media boundaries." };
+        }
         // SEC FORK (#712): the whole bound line is resolved Node-side (numbers
         // embedded) so the generated script never references Node variables.
-        const slipMediaBound = mediaDurationTicks !== null
-          ? `
+        const slipMediaBound = `
             if (newOutTicks > ${mediaDurationTicks.toFixed(0)} + 1) {
               return __editFail("The requested slip offset would move the source out point to " + (newOutTicks / TICKS_PER_SECOND) + "s, past this clip's real media duration of ${(mediaDurationTicks / 254016000000).toFixed(3)}s (ffprobe); slip was not attempted.");
-            }`
-          : "\n            // No media-duration evidence available (still image or unreadable file): no upper source bound applied.";
+            }`;
         const script = buildToolScript(`
           function __editOne(result, nodeId, checkOnly) {
+            var currentMediaPath = "";
+            try { currentMediaPath = String(result.clip.projectItem.getMediaPath() || ""); } catch (eBoundPath) {}
+            if (currentMediaPath !== "${escapeForExtendScript(mediaPath)}") return __editFail("This clip or linked partner uses media without the preflight duration evidence; no edit was attempted.");
+
             var beforeStart = String(result.clip.start.ticks);
             var beforeEnd = String(result.clip.end.ticks);
             var beforeIn = String(result.clip.inPoint.ticks);

@@ -384,7 +384,7 @@ export function getTimelineTools(
 
     trim_clip: {
       description:
-        "Trim exactly one source in/out point and verify the corresponding visible timeline edge. Refuses retimed clips, extensions that would overlap the neighbouring clip on the same track, and, by default, trims that would leave effect keyframes outside the visible clip. Linked audio/video partners get the same trim by default (include_linked), applied as the same offset from each partner's own source point so a J/L cut or slipped audio stays in sync; every clip is checked before any is changed. To set a clip's timeline length or extend a still image, use set_clip_duration.",
+        "Trim exactly one source in/out point and verify the corresponding visible timeline edge. Requires accessible physical media duration from ffprobe; unknown duration or linked partners using different source files refuse before mutation. Refuses retimed clips, extensions that would overlap the neighbouring clip on the same track, and, by default, trims that would leave effect keyframes outside the visible clip. Linked audio/video partners get the same trim by default (include_linked), applied as the same offset from each partner's own source point so a J/L cut or slipped audio stays in sync; every clip is checked before any is changed. To set a clip's timeline length or extend a still image, use set_clip_duration.",
       parameters: {
         type: "object" as const,
         properties: {
@@ -456,8 +456,7 @@ export function getTimelineTools(
         // ffprobe on the clip's media file — not ProjectItem.getOutPoint(),
         // which is an editable source Out mark. Two phases: read the media
         // path, probe duration Node-side, then embed an exact bound. No
-        // evidence (still image, unreadable file): no upper bound, as stills
-        // are legitimately extendable.
+        // missing duration evidence refuses before any mutation.
         const evidenceScript = buildToolScript(`
           var result = __findClip("${escapeForExtendScript(args.node_id)}");
           if (!result) return __error("Clip not found");
@@ -466,25 +465,31 @@ export function getTimelineTools(
           return __result({ mediaPath: mp });
         `);
         let mediaDurationSeconds: number | null = null;
+        let mediaPath = "";
         try {
           const evidence = await sendCommand(evidenceScript, bridgeOptions);
           const evidenceData = (evidence as { data?: { mediaPath?: unknown } } | undefined)?.data;
-          const mediaPath = typeof evidenceData?.mediaPath === "string" ? evidenceData.mediaPath : "";
+          mediaPath = typeof evidenceData?.mediaPath === "string" ? evidenceData.mediaPath : "";
           mediaDurationSeconds = mediaPath ? await probeMediaDuration(mediaPath) : null;
         } catch {
           mediaDurationSeconds = null;
         }
+        if (mediaDurationSeconds === null || !Number.isFinite(mediaDurationSeconds) || mediaDurationSeconds <= 0) {
+          return { success: false, error: "Physical media duration could not be verified. No edit was attempted. Install ffprobe and ensure the source media is accessible; editable project In/Out marks are not media boundaries." };
+        }
         // SEC FORK (#712): the whole bound line is resolved Node-side (numbers
         // embedded) so the generated script never references Node variables.
-        const trimMediaBound = mediaDurationSeconds !== null
-          ? `
+        const trimMediaBound = `
             if (targetOut > ${mediaDurationSeconds.toFixed(3)} + tolerance) {
               return __editFail("The requested source out point " + targetOut + "s exceeds this clip's real media duration of ${mediaDurationSeconds.toFixed(3)}s (ffprobe); trim was not attempted. Premiere would otherwise extend the clip past its available media.");
-            }`
-          : "\n            // No media-duration evidence available (still image or unreadable file): no upper source bound applied.";
+            }`;
 
         const script = buildToolScript(`
           function __editOne(result, nodeId, checkOnly) {
+            var currentMediaPath = "";
+            try { currentMediaPath = String(result.clip.projectItem.getMediaPath() || ""); } catch (eBoundPath) {}
+            if (currentMediaPath !== "${escapeForExtendScript(mediaPath)}") return __editFail("This clip or linked partner uses media without the preflight duration evidence; no edit was attempted.");
+
 
             var clip = result.clip;
 

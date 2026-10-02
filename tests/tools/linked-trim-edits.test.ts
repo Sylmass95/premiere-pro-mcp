@@ -3,8 +3,10 @@ import { runInNewContext } from "node:vm";
 import { getHelpersSource } from "../../src/bridge/script-builder.js";
 import type { BridgeOptions } from "../../src/bridge/file-bridge.js";
 
+vi.mock("../../src/tools/media-evidence.js", () => ({ probeMediaDurationSeconds: vi.fn().mockResolvedValue(3600) }));
+
 vi.mock("../../src/bridge/file-bridge.js", () => ({
-  sendCommand: vi.fn().mockResolvedValue({ success: true, data: {} }),
+  sendCommand: vi.fn().mockResolvedValue({ success: true, data: { mediaPath: "/fixture/source.mp4" } }),
   sendRawCommand: vi.fn().mockResolvedValue({ success: true, data: {} }),
   getTempDir: vi.fn().mockReturnValue("/tmp/test"),
   cleanupTempDir: vi.fn(),
@@ -354,3 +356,31 @@ describe("a partner Premiere moves while the main clip is written", () => {
   });
 });
 
+
+describe("physical source bounds fail before timeline mutation", () => {
+  it("rejects trim and slip beyond probed media duration and leaves linked clips unchanged", async () => {
+    const { video, audio } = host();
+    const before = [...video, ...audio].map(clip => clip.snapshot());
+    const timeline = getTimelineTools(bridgeOptions, { probeMediaDurationSeconds: async () => 10 });
+    const advanced = getAdvancedTools(bridgeOptions, { probeMediaDurationSeconds: async () => 10 });
+    await expect(timeline.trim_clip.handler({ node_id: "v0", new_out_seconds: 39 })).resolves.toMatchObject({ success: false, error: expect.stringContaining("real media duration") });
+    await expect(advanced.slip_edit.handler({ node_id: "v0", offset_seconds: 2 })).resolves.toMatchObject({ success: false, error: expect.stringContaining("real media duration") });
+    expect([...video, ...audio].map(clip => clip.snapshot())).toEqual(before);
+  });
+
+  it("refuses different linked media before applying either clip", async () => {
+    const { video, audio } = host();
+    audio[1].projectItem.getMediaPath = () => "/unprobed/audio.wav";
+    const before = [...video, ...audio].map(clip => clip.snapshot());
+    const advanced = getAdvancedTools(bridgeOptions, { probeMediaDurationSeconds: async () => 3600 });
+    await expect(advanced.slip_edit.handler({ node_id: "v1", offset_seconds: 1 })).resolves.toMatchObject({ success: false, error: expect.stringContaining("without the preflight duration evidence") });
+    expect([...video, ...audio].map(clip => clip.snapshot())).toEqual(before);
+  });
+
+  it.each([null, NaN, Infinity, -1, 0])("refuses unknown or invalid physical duration %s without sending a mutation", async duration => {
+    host();
+    const advanced = getAdvancedTools(bridgeOptions, { probeMediaDurationSeconds: async () => duration });
+    await expect(advanced.slip_edit.handler({ node_id: "v1", offset_seconds: 1 })).resolves.toMatchObject({ success: false, error: expect.stringContaining("Physical media duration") });
+    expect(mockedSendCommand).toHaveBeenCalledTimes(1);
+  });
+});

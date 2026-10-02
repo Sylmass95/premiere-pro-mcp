@@ -1,8 +1,10 @@
 import { runInNewContext } from "node:vm";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+vi.mock("../../src/tools/media-evidence.js", () => ({ probeMediaDurationSeconds: vi.fn().mockResolvedValue(3600) }));
+
 vi.mock("../../src/bridge/file-bridge.js", () => ({
-  sendCommand: vi.fn().mockResolvedValue({ success: true, data: {} }),
+  sendCommand: vi.fn().mockResolvedValue({ success: true, data: { mediaPath: "/fixture/source.mp4" } }),
 }));
 
 import { sendCommand } from "../../src/bridge/file-bridge.js";

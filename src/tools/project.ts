@@ -453,6 +453,188 @@ export function getProjectTools(bridgeOptions: BridgeOptions) {
       },
     },
 
+    place_ae_comps: {
+      description:
+        "Dynamic Link After Effects compositions from one .aep onto the active sequence: imports the missing comps into a bin (importAEComps), then overwrites each placement on its video track with the given in point / duration and Motion scale, drops the comps' own audio, and reads every placement back.",
+      parameters: {
+        type: "object" as const,
+        additionalProperties: false,
+        properties: {
+          ae_project_path: { type: "string", description: "Full path to the .aep file" },
+          bin_name: { type: "string", description: "Root-level bin receiving the comps (created when missing)" },
+          placements: {
+            type: "array",
+            description: "Comps to place, each with its video track, start, in point, duration and scale",
+            minItems: 1,
+            maxItems: 64,
+            items: {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                comp_name: { type: "string", minLength: 1, maxLength: 256 },
+                track_index: { type: "integer", minimum: 0, description: "Video track index (0-based)" },
+                start_seconds: { type: "number", minimum: 0 },
+                in_seconds: { type: "number", minimum: 0, description: "Source in point inside the comp (default 0)" },
+                duration_seconds: { type: "number", exclusiveMinimum: 0 },
+                scale_percent: { type: "number", exclusiveMinimum: 0, description: "Motion > Scale (default 100)" },
+              },
+              required: ["comp_name", "track_index", "start_seconds", "duration_seconds"],
+            },
+          },
+        },
+        required: ["ae_project_path", "bin_name", "placements"],
+      },
+      handler: async (args: {
+        ae_project_path: string;
+        bin_name: string;
+        placements: Array<{
+          comp_name: string;
+          track_index: number;
+          start_seconds: number;
+          in_seconds?: number;
+          duration_seconds: number;
+          scale_percent?: number;
+        }>;
+      }) => {
+        if (typeof args.ae_project_path !== "string" || !/\.aep$/i.test(args.ae_project_path)) {
+          return { success: false, error: "ae_project_path must be the path of an .aep file" };
+        }
+        if (typeof args.bin_name !== "string" || !args.bin_name.trim()) {
+          return { success: false, error: "bin_name must be a non-empty string" };
+        }
+        if (!Array.isArray(args.placements) || args.placements.length < 1 || args.placements.length > 64) {
+          return { success: false, error: "placements must contain between 1 and 64 entries" };
+        }
+        const finite = (v: unknown, min: number) => typeof v === "number" && Number.isFinite(v) && v >= min;
+        for (const [i, p] of args.placements.entries()) {
+          if (typeof p?.comp_name !== "string" || !p.comp_name || p.comp_name.length > 256) {
+            return { success: false, error: `placements[${i}].comp_name must be a non-empty string` };
+          }
+          if (!Number.isSafeInteger(p.track_index) || p.track_index < 0) {
+            return { success: false, error: `placements[${i}].track_index must be a non-negative integer` };
+          }
+          if (!finite(p.start_seconds, 0) || !finite(p.in_seconds ?? 0, 0) || !finite(p.duration_seconds, 0.001) || !finite(p.scale_percent ?? 100, 0.001)) {
+            return { success: false, error: `placements[${i}] needs finite non-negative times, a positive duration and a positive scale` };
+          }
+        }
+        const aePath = escapeForExtendScript(args.ae_project_path);
+        const emitted = args.placements
+          .map(
+            (p) => `{ comp: "${escapeForExtendScript(p.comp_name)}", track: ${p.track_index}, start: ${p.start_seconds}, inS: ${p.in_seconds ?? 0}, dur: ${p.duration_seconds}, scale: ${p.scale_percent ?? 100} }`,
+          )
+          .join(",\n");
+        const script = buildToolScript(`
+          var seq = app.project.activeSequence;
+          if (!seq) return __error("No active sequence");
+          var aeFile = new File("${aePath}");
+          if (!aeFile.exists) return __error("After Effects project not found on disk: ${aePath}");
+          var placements = [${emitted}];
+          var i, c;
+          for (i = 0; i < placements.length; i++) {
+            if (placements[i].track >= seq.videoTracks.numTracks) {
+              return __error("Video track index " + placements[i].track + " is out of range for placement " + i + ". Nothing was placed.");
+            }
+          }
+
+          var root = app.project.rootItem;
+          var bin = null;
+          for (c = 0; c < root.children.numItems; c++) {
+            if (root.children[c].type === ProjectItemType.BIN && root.children[c].name === "${escapeForExtendScript(args.bin_name)}") bin = root.children[c];
+          }
+          if (!bin) bin = root.createBin("${escapeForExtendScript(args.bin_name)}");
+          if (!bin) return __error("Could not create the bin ${escapeForExtendScript(args.bin_name)}");
+
+          // Premiere names a Dynamic Link item "<comp>/<project>.aep".
+          var aeName = aeFile.name ? decodeURI(aeFile.name) : "";
+          function __compItem(comp) {
+            for (var k = 0; k < bin.children.numItems; k++) {
+              var child = bin.children[k];
+              if (child.name === comp || child.name === comp + "/" + aeName) return child;
+            }
+            return null;
+          }
+          var missing = [];
+          var seen = {};
+          for (i = 0; i < placements.length; i++) {
+            var name = placements[i].comp;
+            if (!seen[name] && !__compItem(name)) missing.push(name);
+            seen[name] = true;
+          }
+          if (missing.length > 0) {
+            try {
+              app.project.importAEComps("${aePath}", missing, bin);
+            } catch (importError) {
+              return __error("importAEComps failed: " + importError.toString());
+            }
+          }
+          for (i = 0; i < placements.length; i++) {
+            placements[i].item = __compItem(placements[i].comp);
+            if (!placements[i].item) return __error("Comp not imported from the .aep: " + placements[i].comp + ". Nothing was placed.");
+          }
+
+          var frameTicks = seq.timebase ? parseFloat(seq.timebase) : NaN;
+          if (!frameTicks || isNaN(frameTicks)) frameTicks = TICKS_PER_SECOND / 25;
+          function __placedOn(track, item, startTicks) {
+            for (var k = 0; k < track.clips.numItems; k++) {
+              var clip = track.clips[k];
+              var id = "";
+              try { id = clip.projectItem ? String(clip.projectItem.nodeId) : ""; } catch (e1) {}
+              if (id !== String(item.nodeId)) continue;
+              if (Math.abs(parseFloat(clip.start.ticks) - startTicks) <= frameTicks) return clip;
+            }
+            return null;
+          }
+          var audioIndex = seq.audioTracks.numTracks - 1;
+          var results = [];
+          for (i = 0; i < placements.length; i++) {
+            var p = placements[i];
+            var startTicks = __secondsToTicks(p.start);
+            try {
+              p.item.setInPoint(p.inS, 4);
+              p.item.setOutPoint(p.inS + p.dur, 4);
+            } catch (pointError) {
+              return __error("Could not set the in / out points of " + p.comp + ": " + pointError.toString());
+            }
+            try {
+              seq.overwriteClip(p.item, startTicks.toString(), p.track, audioIndex);
+            } catch (overwriteError) {
+              return __error("overwriteClip failed for " + p.comp + " after " + results.length + " placement(s): " + overwriteError.toString());
+            }
+            var placed = __placedOn(seq.videoTracks[p.track], p.item, startTicks);
+            if (!placed) return __error("Premiere did not place " + p.comp + " on V" + (p.track + 1) + " at " + p.start + " s, after " + results.length + " placement(s).");
+            for (var a = 0; a < seq.audioTracks.numTracks; a++) {
+              var audioClip = __placedOn(seq.audioTracks[a], p.item, startTicks);
+              if (audioClip) audioClip.remove(false, false);
+            }
+            var scaled = false;
+            if (p.scale !== 100) {
+              for (var q = 0; q < placed.components.numItems && !scaled; q++) {
+                var component = placed.components[q];
+                if (component.matchName !== "AE.ADBE Motion" && component.displayName !== "Motion") continue;
+                for (var r = 0; r < component.properties.numItems; r++) {
+                  if (component.properties[r].displayName === "Scale") {
+                    component.properties[r].setValue(p.scale, true);
+                    scaled = true;
+                    break;
+                  }
+                }
+              }
+            }
+            results.push({
+              comp: p.comp,
+              track: p.track,
+              start: placed.start.seconds,
+              end: placed.end.seconds,
+              inPoint: placed.inPoint.seconds,
+              scaled: scaled
+            });
+          }
+          return __result({ placed: results.length, imported: missing.length, bin: bin.name, placements: results });
+        `);
+        return sendCommand(script, { ...bridgeOptions, timeoutMs: Math.max(bridgeOptions.timeoutMs ?? 0, 600_000) });
+      },
+    },
+
     delete_bin: {
       description: "Delete a bin (folder) from the project panel",
       parameters: {

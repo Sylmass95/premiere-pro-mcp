@@ -92,7 +92,7 @@ describe("real-host social sequence regressions", () => {
     if (process.platform === "win32") {
       // en Windows los separadores nativos difieren del original: el script no
       // debe llevar el path forward-slashed (falla silenciosa de QE, #691)
-      expect(script).not.toContain("" + escapeForExtendScript(forwardSlashed) + "");
+      expect(script).not.toContain(escapeForExtendScript(forwardSlashed));
     }
   });
 

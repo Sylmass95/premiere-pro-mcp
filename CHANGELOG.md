@@ -49,8 +49,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
-- `add_to_render_queue` now starts the AME queue batch after queueing (`app.encoder.startBatch()`), because on Premiere 26.5.2 the queued job sits in state Ready and never processes until the queue is started (#687). The receipt reports `queueBatchStart` ("started" or "unavailable: …") and still never presents queueing as a completed encode.
-
 - `set_scale_width_height` never set the height. It wrote to a "Scale Height" property that Premiere's Motion effect does not have, then reported success. With Uniform Scale off, Premiere keeps the height in Motion > Scale. The tool now writes the width to Scale Width and the height to Scale, reads all three values back, fails when any does not match, and rejects values outside 0-10000 before building a script. (#642)
 
 ### Changed
@@ -65,8 +63,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [1.18.5] - 2026-09-28
 
 ### Fixed
-
-- `add_to_render_queue` now starts the AME queue batch after queueing (`app.encoder.startBatch()`), because on Premiere 26.5.2 the queued job sits in state Ready and never processes until the queue is started (#687). The receipt reports `queueBatchStart` ("started" or "unavailable: …") and still never presents queueing as a completed encode.
 
 - `unnest_sequence` refuses before any change when the nest is trimmed, speed-changed or reversed, a target track is locked, or the target range already holds a clip. It now overwrites each nested clip's exact source range in place instead of inserting it, which pushed later clips down the track and ignored each clip's in and out. It reads every clip back afterwards and reports "The timeline changed … Use Undo" on any mismatch. Effects, keyframes, and transitions inside the nest are not carried over; the description says so. (#642)
 - `move_clip_to_track` refuses before calling QE when either track is locked or the target range is occupied, finds the moved clip even when its node ID changes, and reports a copy left on the original track or a changed start, length, or in/out. It is now marked EXPERIMENTAL (QE) and rejects non-integer track numbers. (#642)
@@ -91,8 +87,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
-- `add_to_render_queue` now starts the AME queue batch after queueing (`app.encoder.startBatch()`), because on Premiere 26.5.2 the queued job sits in state Ready and never processes until the queue is started (#687). The receipt reports `queueBatchStart` ("started" or "unavailable: …") and still never presents queueing as a completed encode.
-
 - `import_transcript_uxp` refuses to import over an existing transcript (`UXP_TRANSCRIPT_OVERWRITE_REFUSED`). On Premiere 26.5.1 a failed import cleared an existing transcript that could not be restored. (#642)
 - UXP commands larger than the panel's 64 KiB frame limit are refused by the server with `UXP_COMMAND_TOO_LARGE` instead of timing out after 30 seconds. (#642)
 - `manage_metadata_uxp` update and field update fail with `UXP_METADATA_NOT_APPLIED` when Premiere commits the transaction but the metadata reads back unchanged, instead of reporting `updated: true`. (#642)
@@ -111,8 +105,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
-- `add_to_render_queue` now starts the AME queue batch after queueing (`app.encoder.startBatch()`), because on Premiere 26.5.2 the queued job sits in state Ready and never processes until the queue is started (#687). The receipt reports `queueBatchStart` ("started" or "unavailable: …") and still never presents queueing as a completed encode.
-
 - `get_work_area` now reads work-area points as seconds, as live Premiere 25.2 and 26.5.1 hosts return them. It had divided them by ticks-per-second and reported values near zero. `set_work_area` writes seconds and reads the result back; it fails honestly when a build ignores the write. (#642)
 - `export_sequence` now fails when Premiere rejects the render or writes no file. (#647)
 - UXP source-media timing reads Premiere 26.5's documented synchronous `Media.getStart()` / `getDuration()` before the deprecated Promise-returning `start` / `duration` properties, so `manage_source_media_timing_uxp` can set a start time on 26.5 hosts instead of reporting the command unavailable.
@@ -129,8 +121,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
-- `add_to_render_queue` now starts the AME queue batch after queueing (`app.encoder.startBatch()`), because on Premiere 26.5.2 the queued job sits in state Ready and never processes until the queue is started (#687). The receipt reports `queueBatchStart` ("started" or "unavailable: …") and still never presents queueing as a completed encode.
-
 - Prevented inspect tools from evaluating unescaped ExtendScript. (#639)
 
 ### Documentation
@@ -144,8 +134,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [1.18.1] - 2026-09-23
 
 ### Fixed
-
-- `add_to_render_queue` now starts the AME queue batch after queueing (`app.encoder.startBatch()`), because on Premiere 26.5.2 the queued job sits in state Ready and never processes until the queue is started (#687). The receipt reports `queueBatchStart` ("started" or "unavailable: …") and still never presents queueing as a completed encode.
 
 - `manage_proxies` create and `add_to_render_queue` pass a Boolean
   `removeUponCompletion` to Adobe Media Encoder, fixing "Illegal Parameter type"
@@ -182,8 +170,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   optional `expected_values` audit that flags stale Headline text. (#617)
 
 ### Fixed
-
-- `add_to_render_queue` now starts the AME queue batch after queueing (`app.encoder.startBatch()`), because on Premiere 26.5.2 the queued job sits in state Ready and never processes until the queue is started (#687). The receipt reports `queueBatchStart` ("started" or "unavailable: …") and still never presents queueing as a completed encode.
 
 - `encode_file` and `encode_project_item` pass natively typed arguments (String
   paths, Boolean removal flag, Time in/out), fixing "Illegal Parameter type";
@@ -232,8 +218,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
-- `add_to_render_queue` now starts the AME queue batch after queueing (`app.encoder.startBatch()`), because on Premiere 26.5.2 the queued job sits in state Ready and never processes until the queue is started (#687). The receipt reports `queueBatchStart` ("started" or "unavailable: …") and still never presents queueing as a completed encode.
-
 - `set_target_track` targets exclusively by default (`exclusive: false` keeps
   other tracks targeted) and reads every track back; `get_target_tracks` lists
   every targeted track and unreadable tracks. (#587)
@@ -264,8 +248,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   and pin client CEP install commands to the published package. (#582)
 
 ### Fixed
-
-- `add_to_render_queue` now starts the AME queue batch after queueing (`app.encoder.startBatch()`), because on Premiere 26.5.2 the queued job sits in state Ready and never processes until the queue is started (#687). The receipt reports `queueBatchStart` ("started" or "unavailable: …") and still never presents queueing as a completed encode.
 
 - `set_item_in_out` and `set_source_in_out` pass seconds, not ticks, to
   `ProjectItem.setInPoint`/`setOutPoint` and verify tick readback. A Source
@@ -298,8 +280,6 @@ rendered-output verification.
 ## [1.16.2] - 2026-09-18
 
 ### Fixed
-
-- `add_to_render_queue` now starts the AME queue batch after queueing (`app.encoder.startBatch()`), because on Premiere 26.5.2 the queued job sits in state Ready and never processes until the queue is started (#687). The receipt reports `queueBatchStart` ("started" or "unavailable: …") and still never presents queueing as a completed encode.
 
 - Direct UXP `.ccx` packages now use a plugin-id bundle root and Unix 644/755
   permission bits so Creative Cloud / UPI can extract plugin metadata. (#566)
@@ -338,8 +318,6 @@ rendered-output verification.
   community and competitor evidence and verification boundaries.
 
 ### Fixed
-
-- `add_to_render_queue` now starts the AME queue batch after queueing (`app.encoder.startBatch()`), because on Premiere 26.5.2 the queued job sits in state Ready and never processes until the queue is started (#687). The receipt reports `queueBatchStart` ("started" or "unavailable: …") and still never presents queueing as a completed encode.
 
 - `insert_from_source`, `add_to_timeline`, `add_to_timeline_batch`, and
   `apply_edit_plan` insert operations no longer report success after
@@ -387,8 +365,6 @@ rendered-output verification.
 
 ### Fixed
 
-- `add_to_render_queue` now starts the AME queue batch after queueing (`app.encoder.startBatch()`), because on Premiere 26.5.2 the queued job sits in state Ready and never processes until the queue is started (#687). The receipt reports `queueBatchStart` ("started" or "unavailable: …") and still never presents queueing as a completed encode.
-
 - Host-reported tool crashes and false verification for clip markers, MOGRT JSON
   values, first transcript import, FCP XML destination checks, and UXP tree
   IDs. (#544)
@@ -414,8 +390,6 @@ rendered-output verification.
 
 ### Fixed
 
-- `add_to_render_queue` now starts the AME queue batch after queueing (`app.encoder.startBatch()`), because on Premiere 26.5.2 the queued job sits in state Ready and never processes until the queue is started (#687). The receipt reports `queueBatchStart` ("started" or "unavailable: …") and still never presents queueing as a completed encode.
-
 - `trim_clip` now rolls back source metadata to prevent clip corruption when a partial write occurs (source points changed but timeline edge didn't move). Previously these clips entered a permanently-stuck state. (#509, #503)
 - `export_frame`, `capture_frame`, `freeze_frame`, and the `export_sequence_*_review_frames` tools now write the requested frame on macOS Premiere Pro 26.5 / 27 beta. QE still exporters take `(timecodeString, pathWithoutExtension)`; the previous `(path, width, height)` call returned `false` without writing a file, so every frame export fell through to the Media Encoder fallback. Frame time is now formatted with `Time.getFormatted()` in the sequence's display format (drop-frame included), the editor's playhead is no longer moved, and the result reports the timecode and frame index that were rendered. (#510)
 - Preset discovery (`get_encoder_presets`, the default `export_sequence` preset, proxy ingest presets, and the still-image fallback) now looks inside the `.app` bundle that lives one level below `/Applications/Adobe Media Encoder <version>/` on macOS. Previously only the user's own presets under `~/Documents/Adobe/Adobe Media Encoder/*/Presets` were found. (#510)
@@ -432,8 +406,6 @@ rendered-output verification.
 ## [1.15.1] - 2026-09-11
 
 ### Fixed
-
-- `add_to_render_queue` now starts the AME queue batch after queueing (`app.encoder.startBatch()`), because on Premiere 26.5.2 the queued job sits in state Ready and never processes until the queue is started (#687). The receipt reports `queueBatchStart` ("started" or "unavailable: …") and still never presents queueing as a completed encode.
 
 - Use a null destination for UXP project-root file imports, matching the Premiere API contract.
 - Consolidate exported page aliases with permanent redirects and improve homepage accessibility, image delivery, and installation journeys.
@@ -510,8 +482,6 @@ Automated checks do not establish licensed Premiere or After Effects playback or
   Both are read-only and never change Premiere.
 
 ### Fixed
-
-- `add_to_render_queue` now starts the AME queue batch after queueing (`app.encoder.startBatch()`), because on Premiere 26.5.2 the queued job sits in state Ready and never processes until the queue is started (#687). The receipt reports `queueBatchStart` ("started" or "unavailable: …") and still never presents queueing as a completed encode.
 
 - `inspect_video_transition_uxp` now resolves the documented
   `VideoClipTrackItem` surface through `VideoClipTrackItem.cast()` before
@@ -645,8 +615,6 @@ Automated checks do not establish licensed Premiere or After Effects playback or
 
 ### Fixed
 
-- `add_to_render_queue` now starts the AME queue batch after queueing (`app.encoder.startBatch()`), because on Premiere 26.5.2 the queued job sits in state Ready and never processes until the queue is started (#687). The receipt reports `queueBatchStart` ("started" or "unavailable: …") and still never presents queueing as a completed encode.
-
 - Added an explicit `PREMIERE_MCP_PROTOCOL_MODE=legacy` fallback for desktop
   clients whose stdio protocol negotiation cannot use the modern server mode;
   the default remains the current automatic mode and invalid values fail fast.
@@ -670,8 +638,6 @@ Automated checks do not establish licensed Premiere or After Effects playback or
 
 ### Fixed
 
-- `add_to_render_queue` now starts the AME queue batch after queueing (`app.encoder.startBatch()`), because on Premiere 26.5.2 the queued job sits in state Ready and never processes until the queue is started (#687). The receipt reports `queueBatchStart` ("started" or "unavailable: …") and still never presents queueing as a completed encode.
-
 - Made unsupported sequence pixel-aspect ratios, partial transitions,
   unavailable media timing readback, and incomplete delivery probes fail
   closed instead of reporting unverified success.
@@ -688,16 +654,12 @@ Automated checks do not establish licensed Premiere or After Effects playback or
 
 ### Fixed
 
-- `add_to_render_queue` now starts the AME queue batch after queueing (`app.encoder.startBatch()`), because on Premiere 26.5.2 the queued job sits in state Ready and never processes until the queue is started (#687). The receipt reports `queueBatchStart` ("started" or "unavailable: …") and still never presents queueing as a completed encode.
-
 - Corrected macOS bridge-directory handling when `TMPDIR` is set and made QE
   transition writes target the intended clip on current Premiere builds.
 
 ## [1.14.4] - 2026-08-29
 
 ### Fixed
-
-- `add_to_render_queue` now starts the AME queue batch after queueing (`app.encoder.startBatch()`), because on Premiere 26.5.2 the queued job sits in state Ready and never processes until the queue is started (#687). The receipt reports `queueBatchStart` ("started" or "unavailable: …") and still never presents queueing as a completed encode.
 
 - Corrected QE razor operations to pass sequence timecode rather than ticks and
   added regression coverage for both split and all-track cuts.
@@ -750,8 +712,6 @@ Automated checks do not establish licensed Premiere or After Effects playback or
 
 ### Fixed
 
-- `add_to_render_queue` now starts the AME queue batch after queueing (`app.encoder.startBatch()`), because on Premiere 26.5.2 the queued job sits in state Ready and never processes until the queue is started (#687). The receipt reports `queueBatchStart` ("started" or "unavailable: …") and still never presents queueing as a completed encode.
-
 - Restored strict JSON Schema 2020-12 tool compatibility and corrected legacy
   CEP argument contracts, Premiere Time units, Adobe Media Encoder output
   paths, active-sequence verification, metadata readback, XMP patch merging,
@@ -772,8 +732,6 @@ Automated checks do not establish licensed Premiere or After Effects playback or
 ## [1.14.1] - 2026-08-27
 
 ### Fixed
-
-- `add_to_render_queue` now starts the AME queue batch after queueing (`app.encoder.startBatch()`), because on Premiere 26.5.2 the queued job sits in state Ready and never processes until the queue is started (#687). The receipt reports `queueBatchStart` ("started" or "unavailable: …") and still never presents queueing as a completed encode.
 
 - Made npm package verification isolate its temporary tarball and select the
   package matching `package.json`, avoiding a current npm CLI packaging
@@ -818,8 +776,6 @@ Automated checks do not establish licensed Premiere or After Effects playback or
 
 ### Fixed
 
-- `add_to_render_queue` now starts the AME queue batch after queueing (`app.encoder.startBatch()`), because on Premiere 26.5.2 the queued job sits in state Ready and never processes until the queue is started (#687). The receipt reports `queueBatchStart` ("started" or "unavailable: …") and still never presents queueing as a completed encode.
-
 - `set_effect_property` now accepts safely serialized string values as well as
   numbers, unlocking MOGRT and graphic parameters that Premiere exposes as
   JSON strings. Responses report parameter readback separately from render
@@ -832,8 +788,6 @@ Automated checks do not establish licensed Premiere or After Effects playback or
 ## [1.12.1] - 2026-08-22
 
 ### Fixed
-
-- `add_to_render_queue` now starts the AME queue batch after queueing (`app.encoder.startBatch()`), because on Premiere 26.5.2 the queued job sits in state Ready and never processes until the queue is started (#687). The receipt reports `queueBatchStart` ("started" or "unavailable: …") and still never presents queueing as a completed encode.
 
 - Allowed Google Analytics collection requests to `www.google.com` in the
   restrictive Content Security Policy, matching the current Google tag client.
@@ -853,8 +807,6 @@ Automated checks do not establish licensed Premiere or After Effects playback or
 
 ### Fixed
 
-- `add_to_render_queue` now starts the AME queue batch after queueing (`app.encoder.startBatch()`), because on Premiere 26.5.2 the queued job sits in state Ready and never processes until the queue is started (#687). The receipt reports `queueBatchStart` ("started" or "unavailable: …") and still never presents queueing as a completed encode.
-
 - Editorial-plan preview and apply now accept only exact server-issued plans
   with opaque confirmation tokens. Client-modified plans and duplicate source
   guards are rejected before any UXP mutation.
@@ -863,8 +815,6 @@ Automated checks do not establish licensed Premiere or After Effects playback or
 ## [1.11.5] - 2026-08-19
 
 ### Fixed
-
-- `add_to_render_queue` now starts the AME queue batch after queueing (`app.encoder.startBatch()`), because on Premiere 26.5.2 the queued job sits in state Ready and never processes until the queue is started (#687). The receipt reports `queueBatchStart` ("started" or "unavailable: …") and still never presents queueing as a completed encode.
 
 - macOS Adobe Media Encoder preset discovery now scans application-bundle resources under
   `Contents/MediaIO/systempresets`, and preset filtering normalizes names such as `H.264` and
@@ -889,8 +839,6 @@ Automated checks do not establish licensed Premiere or After Effects playback or
 
 ### Fixed
 
-- `add_to_render_queue` now starts the AME queue batch after queueing (`app.encoder.startBatch()`), because on Premiere 26.5.2 the queued job sits in state Ready and never processes until the queue is started (#687). The receipt reports `queueBatchStart` ("started" or "unavailable: …") and still never presents queueing as a completed encode.
-
 - The Claude Desktop MCPB now prompts for a sensitive Premiere UXP token and maps it to
   `PREMIERE_UXP_TOKEN` in the bundled server process, allowing the authenticated loopback UXP
   listener to start when Claude Desktop does not inherit login-shell environment variables.
@@ -904,8 +852,6 @@ Automated checks do not establish licensed Premiere or After Effects playback or
   timeline, and requires duplicate-sequence and post-mutation verification safeguards.
 
 ### Fixed
-
-- `add_to_render_queue` now starts the AME queue batch after queueing (`app.encoder.startBatch()`), because on Premiere 26.5.2 the queued job sits in state Ready and never processes until the queue is started (#687). The receipt reports `queueBatchStart` ("started" or "unavailable: …") and still never presents queueing as a completed encode.
 
 - Premiere Pro 26.3 can reject a manifest list of loopback WebSocket domains with `Manifest entry
   not found`. The UXP package now uses Adobe's compatible network permission while the panel keeps
@@ -924,8 +870,6 @@ Automated checks do not establish licensed Premiere or After Effects playback or
   resource documenting privacy, invalidation, retrieval, and preview requirements.
 
 ### Fixed
-
-- `add_to_render_queue` now starts the AME queue batch after queueing (`app.encoder.startBatch()`), because on Premiere 26.5.2 the queued job sits in state Ready and never processes until the queue is started (#687). The receipt reports `queueBatchStart` ("started" or "unavailable: …") and still never presents queueing as a completed encode.
 
 - `add_track` and QE-backed `add_tracks` now validate their inputs and return success
   only after the active sequence reports the exact requested track-count increase. The
@@ -959,8 +903,6 @@ Automated checks do not establish licensed Premiere or After Effects playback or
 
 ### Fixed
 
-- `add_to_render_queue` now starts the AME queue batch after queueing (`app.encoder.startBatch()`), because on Premiere 26.5.2 the queued job sits in state Ready and never processes until the queue is started (#687). The receipt reports `queueBatchStart` ("started" or "unavailable: …") and still never presents queueing as a completed encode.
-
 - Extensionless landing routes such as `/changelog` now resolve to their
   exported `index.html` file instead of attempting to stream a directory. The
   previous behavior emitted an unhandled `EISDIR` error on Linux and restarted
@@ -978,8 +920,6 @@ Automated checks do not establish licensed Premiere or After Effects playback or
 ## [1.11.0] - 2026-08-16
 
 ### Fixed
-
-- `add_to_render_queue` now starts the AME queue batch after queueing (`app.encoder.startBatch()`), because on Premiere 26.5.2 the queued job sits in state Ready and never processes until the queue is started (#687). The receipt reports `queueBatchStart` ("started" or "unavailable: …") and still never presents queueing as a completed encode.
 
 - `set_clip_volume` passed decibels straight into Premiere's `Volume > Level`
   property, which is a normalised 0..1 value where 1.0 is +15 dB, not a dB
@@ -1081,8 +1021,6 @@ Automated checks do not establish licensed Premiere or After Effects playback or
 ## [1.9.2] - 2026-08-04
 
 ### Fixed
-
-- `add_to_render_queue` now starts the AME queue batch after queueing (`app.encoder.startBatch()`), because on Premiere 26.5.2 the queued job sits in state Ready and never processes until the queue is started (#687). The receipt reports `queueBatchStart` ("started" or "unavailable: …") and still never presents queueing as a completed encode.
 
 - Changed the CEP Premiere host declaration to a minimum-only supported version
   so Adobe Developer Distribution does not reject the signed ZXP for claiming
@@ -1192,8 +1130,6 @@ Automated checks do not establish licensed Premiere or After Effects playback or
 
 ### Fixed
 
-- `add_to_render_queue` now starts the AME queue batch after queueing (`app.encoder.startBatch()`), because on Premiere 26.5.2 the queued job sits in state Ready and never processes until the queue is started (#687). The receipt reports `queueBatchStart` ("started" or "unavailable: …") and still never presents queueing as a completed encode.
-
 - `create_project` now rejects directory paths and verifies that Premiere switched to the exact
   requested `.prproj` path before reporting success, preventing edits from continuing in a
   previously open project after a failed creation attempt.
@@ -1218,8 +1154,6 @@ Automated checks do not establish licensed Premiere or After Effects playback or
   between the 279 registered tools and the 277 tools available to the default profile.
 
 ### Fixed
-
-- `add_to_render_queue` now starts the AME queue batch after queueing (`app.encoder.startBatch()`), because on Premiere 26.5.2 the queued job sits in state Ready and never processes until the queue is started (#687). The receipt reports `queueBatchStart` ("started" or "unavailable: …") and still never presents queueing as a completed encode.
 
 - Structural timeline tools now verify razor, ripple-delete, transition, and track-targeting
   mutations instead of reporting success when Premiere applied only part or none of an edit.
@@ -1247,8 +1181,6 @@ Automated checks do not establish licensed Premiere or After Effects playback or
 
 ### Fixed
 
-- `add_to_render_queue` now starts the AME queue batch after queueing (`app.encoder.startBatch()`), because on Premiere 26.5.2 the queued job sits in state Ready and never processes until the queue is started (#687). The receipt reports `queueBatchStart` ("started" or "unavailable: …") and still never presents queueing as a completed encode.
-
 - Fixed `set_sequence_frame_rate` to convert frames per second into Premiere's required
   ticks-per-frame `Time` value and verify the applied setting instead of assigning a numeric frame
   period that could corrupt the sequence timebase. ([#37](https://github.com/leancoderkavy/premiere-pro-mcp/issues/37))
@@ -1272,8 +1204,6 @@ Automated checks do not establish licensed Premiere or After Effects playback or
 
 ### Fixed
 
-- `add_to_render_queue` now starts the AME queue batch after queueing (`app.encoder.startBatch()`), because on Premiere 26.5.2 the queued job sits in state Ready and never processes until the queue is started (#687). The receipt reports `queueBatchStart` ("started" or "unavailable: …") and still never presents queueing as a completed encode.
-
 - Added explicit Node types for TypeScript 7 and updated Zod 4 JSON-schema conversion.
 - Fixed Windows installations that require a signed CEP extension instead of the debug-mode raw
   folder used by development builds. ([#36](https://github.com/leancoderkavy/premiere-pro-mcp/issues/36))
@@ -1288,8 +1218,6 @@ Automated checks do not establish licensed Premiere or After Effects playback or
 ## [1.2.2] - 2026-07-23
 
 ### Fixed
-
-- `add_to_render_queue` now starts the AME queue batch after queueing (`app.encoder.startBatch()`), because on Premiere 26.5.2 the queued job sits in state Ready and never processes until the queue is started (#687). The receipt reports `queueBatchStart` ("started" or "unavailable: …") and still never presents queueing as a completed encode.
 
 - Corrected obsolete repository links in the npm README and republished package metadata so the
   repository, homepage, and issue links point to the maintained project.
@@ -1309,8 +1237,6 @@ Automated checks do not establish licensed Premiere or After Effects playback or
 - Added GitHub Actions build, test, and package validation on Windows and macOS with Node 18 and 22.
 
 ### Fixed
-
-- `add_to_render_queue` now starts the AME queue batch after queueing (`app.encoder.startBatch()`), because on Premiere 26.5.2 the queued job sits in state Ready and never processes until the queue is started (#687). The receipt reports `queueBatchStart` ("started" or "unavailable: …") and still never presents queueing as a completed encode.
 
 - Audio-level writes now convert dB to Premiere's amplitude value and verify the applied value.
 - Audio keyframes now use Premiere `Time` objects and verify each written value.
@@ -1366,8 +1292,6 @@ Automated checks do not establish licensed Premiere or After Effects playback or
 
 ### Fixed
 
-- `add_to_render_queue` now starts the AME queue batch after queueing (`app.encoder.startBatch()`), because on Premiere 26.5.2 the queued job sits in state Ready and never processes until the queue is started (#687). The receipt reports `queueBatchStart` ("started" or "unavailable: …") and still never presents queueing as a completed encode.
-
 - **Frame capture's Media Encoder fallback now exports exactly one frame.** The fallback passed
   tick values to sequence in/out methods that require seconds, producing an invalid export range
   when the undocumented QE frame-export method wrote no file. The range and its saved state are
@@ -1395,8 +1319,6 @@ got a bridge that returned `null` for every tool call. If that was your symptom,
 whole fix.
 
 ### Fixed
-
-- `add_to_render_queue` now starts the AME queue batch after queueing (`app.encoder.startBatch()`), because on Premiere 26.5.2 the queued job sits in state Ready and never processes until the queue is started (#687). The receipt reports `queueBatchStart` ("started" or "unavailable: …") and still never presents queueing as a completed encode.
 
 - **The bridge returns data again on Premiere Pro 2023+ / CEP 12.** The published `CSInterface.js`
   shim called `__adobe_cep__.evalScript(script)` without forwarding the callback. CEP 9+ is

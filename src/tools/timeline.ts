@@ -468,6 +468,7 @@ export function getTimelineTools(
         let mediaPath = "";
         try {
           const evidence = await sendCommand(evidenceScript, bridgeOptions);
+          if (evidence && evidence.success === false) return evidence;
           const evidenceData = (evidence as { data?: { mediaPath?: unknown } } | undefined)?.data;
           mediaPath = typeof evidenceData?.mediaPath === "string" ? evidenceData.mediaPath : "";
           mediaDurationSeconds = mediaPath ? await probeMediaDuration(mediaPath) : null;
@@ -480,7 +481,7 @@ export function getTimelineTools(
         // SEC FORK (#712): the whole bound line is resolved Node-side (numbers
         // embedded) so the generated script never references Node variables.
         const trimMediaBound = `
-            if (targetOut > ${mediaDurationSeconds.toFixed(3)} + tolerance) {
+            if (targetOut > ${mediaDurationSeconds}) {
               return __editFail("The requested source out point " + targetOut + "s exceeds this clip's real media duration of ${mediaDurationSeconds.toFixed(3)}s (ffprobe); trim was not attempted. Premiere would otherwise extend the clip past its available media.");
             }`;
 

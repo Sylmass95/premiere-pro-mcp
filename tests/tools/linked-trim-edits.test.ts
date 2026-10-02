@@ -358,12 +358,12 @@ describe("a partner Premiere moves while the main clip is written", () => {
 
 
 describe("physical source bounds fail before timeline mutation", () => {
-  it("rejects trim and slip beyond probed media duration and leaves linked clips unchanged", async () => {
+  it.each([39, 10.02])("rejects source out %s beyond physical duration without frame tolerance and leaves linked clips unchanged", async newOut => {
     const { video, audio } = host();
     const before = [...video, ...audio].map(clip => clip.snapshot());
     const timeline = getTimelineTools(bridgeOptions, { probeMediaDurationSeconds: async () => 10 });
     const advanced = getAdvancedTools(bridgeOptions, { probeMediaDurationSeconds: async () => 10 });
-    await expect(timeline.trim_clip.handler({ node_id: "v0", new_out_seconds: 39 })).resolves.toMatchObject({ success: false, error: expect.stringContaining("real media duration") });
+    await expect(timeline.trim_clip.handler({ node_id: "v0", new_out_seconds: newOut })).resolves.toMatchObject({ success: false, error: expect.stringContaining("real media duration") });
     await expect(advanced.slip_edit.handler({ node_id: "v0", offset_seconds: 2 })).resolves.toMatchObject({ success: false, error: expect.stringContaining("real media duration") });
     expect([...video, ...audio].map(clip => clip.snapshot())).toEqual(before);
   });

@@ -1518,7 +1518,7 @@ describe("#712 rework: media bound from real ffprobe duration (owner review)", (
     const tools = getTimelineTools(bridgeOptions, { probeMediaDurationSeconds: async () => 10 });
     await tools.trim_clip.handler({ node_id: "clip-1", new_out_seconds: 15 });
     const script = mockedSendCommand.mock.calls.at(-1)[0] as string;
-    expect(script).toContain("targetOut > 10.000 + tolerance");
+    expect(script).toContain("targetOut > 10");
     expect(script).toContain('real media duration of 10.000s (ffprobe)');
     expect(script).not.toContain("projectItem.getOutPoint()");
   });
@@ -1536,5 +1536,20 @@ describe("#712 rework: media bound from real ffprobe duration (owner review)", (
     await tools.slip_edit.handler({ node_id: "clip-1", offset_seconds: 2 });
     const script = mockedSendCommand.mock.calls.at(-1)[0] as string;
     expect(script).toContain("past this clip's real media duration of 10.000s (ffprobe)");
+  });
+});
+
+describe("source evidence preserves lookup failures", () => {
+  it.each(["trim", "slip"])("%s preserves a missing-clip error and never probes or mutates", async operation => {
+    const failure = { success: false, error: "Clip not found" };
+    mockedSendCommand.mockResolvedValueOnce(failure);
+    const probe = vi.fn().mockResolvedValue(10);
+    const tool = operation === "trim"
+      ? getTimelineTools(bridgeOptions, { probeMediaDurationSeconds: probe }).trim_clip
+      : getAdvancedTools(bridgeOptions, { probeMediaDurationSeconds: probe }).slip_edit;
+    const args = operation === "trim" ? { node_id: "missing", new_out_seconds: 12 } : { node_id: "missing", offset_seconds: 2 };
+    await expect(tool.handler(args as never)).resolves.toEqual(failure);
+    expect(probe).not.toHaveBeenCalled();
+    expect(mockedSendCommand).toHaveBeenCalledTimes(1);
   });
 });

@@ -305,6 +305,7 @@ export function getAdvancedTools(
         let mediaPath = "";
         try {
           const evidence = await sendCommand(evidenceScript, bridgeOptions);
+          if (evidence && evidence.success === false) return evidence;
           const evidenceData = (evidence as { data?: { mediaPath?: unknown } } | undefined)?.data;
           mediaPath = typeof evidenceData?.mediaPath === "string" ? evidenceData.mediaPath : "";
           const duration = mediaPath ? await probeMediaDuration(mediaPath) : null;
@@ -318,7 +319,7 @@ export function getAdvancedTools(
         // SEC FORK (#712): the whole bound line is resolved Node-side (numbers
         // embedded) so the generated script never references Node variables.
         const slipMediaBound = `
-            if (newOutTicks > ${mediaDurationTicks.toFixed(0)} + 1) {
+            if (newOutTicks > ${mediaDurationTicks}) {
               return __editFail("The requested slip offset would move the source out point to " + (newOutTicks / TICKS_PER_SECOND) + "s, past this clip's real media duration of ${(mediaDurationTicks / 254016000000).toFixed(3)}s (ffprobe); slip was not attempted.");
             }`;
         const script = buildToolScript(`

@@ -1061,10 +1061,10 @@ describe("issue #238 — AME uses canonical paths and documented encodeFile posi
 
     expect(queued).toContain("var outputFile = new File");
     expect(queued).toContain("var jobId = encoder.encodeSequence");
-    // The receipt must never present queueing as a completed encode (#238),
-    // and on 26.5.2 the AME queue does not auto-start, so the script must
-    // start the batch after queuing (#687 live observation).
-    expect(queued).toContain("Output-file creation is not verified by this tool");
+    // Queueing remains an unverified handoff. Batch start is opt-in because it
+    // affects every ready AME job, including jobs unrelated to this call.
+    expect(queued).toContain("Batch startup and output-file creation are not verified by this tool");
+    expect(queued).toContain("if (false)");
     expect(queued).toContain("app.encoder.startBatch()");
     expect(projectItem).toContain("outputFile.fsName");
     expect(projectItem).toContain("var jobId = app.encoder.encodeProjectItem");
@@ -1242,6 +1242,62 @@ describe("issue #326 — sequence creation requires project-collection readback"
     expect(script).toContain("var created = __findSequence(sequenceId)");
     expect(script).toContain("no creation success is reported");
     expect(script).toContain("verified: true");
+  });
+
+  it("applies the same new-ID readback to create_sequence_from_preset", async () => {
+    const script = await scriptFor(sequence.create_sequence_from_preset, {
+      name: "Interview", preset_path: "/tmp/sequence.sqpreset",
+    });
+    expect(script).toContain("var beforeSequenceIds = {}");
+    expect(script).toContain("if (beforeSequenceIds[sequenceId])");
+    expect(script).toContain("did not create a new sequence");
+    expect(script).toContain("var created = __findSequence(sequenceId)");
+    expect(script).toContain("no creation success is reported");
+    expect(script).toContain("verified: true");
+  });
+
+  it("fails closed when create_sequence_from_preset would claim the already-active sequence", async () => {
+    const existing = { name: "Interview", sequenceID: "seq-existing" };
+    const sequences = new Proxy({}, {
+      get: (_t, k) => (k === "numSequences" ? 1 : existing),
+    });
+    mockedSendCommand.mockImplementation(async (script: string) =>
+      JSON.parse(String(runInNewContext(`${getHelpersSource()}\n${script}`, {
+        app: {
+          enableQE() {},
+          project: { sequences, activeSequence: existing },
+        },
+        qe: { project: { newSequence() {} } },
+      }))));
+
+    await expect(sequence.create_sequence_from_preset.handler({
+      name: "Interview",
+      preset_path: "/tmp/sequence.sqpreset",
+    })).resolves.toMatchObject({
+      success: false,
+      error: expect.stringContaining("already existed before the preset request"),
+    });
+  });
+
+  it.each([false, true])("verifies a fresh active sequence only when present in the collection (%s)", async (listed) => {
+    const existing = { name: "Old", sequenceID: "seq-existing" };
+    const created = { name: "Interview", sequenceID: "seq-created" };
+    const items = [existing];
+    const project = {
+      activeSequence: existing,
+      sequences: new Proxy({}, { get: (_t, k) => k === "numSequences" ? items.length : items[Number(k)] }),
+    };
+    mockedSendCommand.mockImplementation(async (script: string) =>
+      JSON.parse(String(runInNewContext(`${getHelpersSource()}\n${script}`, {
+        app: { enableQE() {}, project },
+        qe: { project: { newSequence() { project.activeSequence = created; if (listed) items.push(created); } } },
+      }))));
+    const result = await sequence.create_sequence_from_preset.handler({ name: "Interview", preset_path: "/tmp/sequence.sqpreset" });
+    if (listed) {
+      expect(result).toMatchObject({ success: true, data: { created: true, verified: true, id: "seq-created", name: "Interview" } });
+    } else {
+      expect(result).toMatchObject({ success: false, error: expect.stringContaining("did not add the new sequence to the project collection") });
+    }
   });
 });
 

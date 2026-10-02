@@ -1204,7 +1204,7 @@ export function getExportTools(bridgeOptions: BridgeOptions) {
 
     add_to_render_queue: {
       description:
-        "Request an Adobe Media Encoder render-queue handoff for the active sequence. Requires a saved project and an .epr preset_path. Same as Project presets are refused before Premiere is contacted because AME encodes from a scratch project copy.",
+        "Request an Adobe Media Encoder render-queue handoff for the active sequence. Requires a saved project and an .epr preset_path. Same as Project presets are refused before Premiere is contacted because AME encodes from a scratch project copy. Optional start_batch requests processing of every ready AME queue job, including unrelated jobs.",
       parameters: {
         type: "object" as const,
         properties: {
@@ -1216,22 +1216,24 @@ export function getExportTools(bridgeOptions: BridgeOptions) {
             type: "string",
             description: "Required path to an AME preset file (.epr). Omitting this raises an Illegal Parameter error on current Premiere hosts.",
           },
+          start_batch: {
+            type: "boolean",
+            description: "Opt in to start the entire ready Adobe Media Encoder queue after this handoff, including unrelated jobs. Default false (enqueue only). A successful call does not verify that any render started or completed.",
+          },
         },
         required: ["output_path", "preset_path"],
       },
-      handler: async (args: { output_path: string; preset_path?: string }) => {
+      handler: async (args: { output_path: string; preset_path?: string; start_batch?: boolean }) => {
         if (typeof args.preset_path !== "string" || !args.preset_path.trim()) {
           return {
             success: false,
             error: "preset_path is required. Pass a .epr file; omitting it falls through to an Illegal Parameter error on this host.",
           };
         }
-        // QE/AME choke on forward-slash paths here with "Unknown error exception"
-        // (#711): resolve both to native separators before embedding them.
-        const resolvedOutputPath = resolve(args.output_path);
-        const resolvedPresetPath = resolve(args.preset_path);
+        const outputPath = resolve(args.output_path);
+        const presetPath = resolve(args.preset_path);
         try {
-          inspectExportPresetFile(resolvedPresetPath);
+          inspectExportPresetFile(presetPath);
         } catch (error) {
           return { success: false, error: error instanceof Error ? error.message : String(error) };
         }
@@ -1247,14 +1249,15 @@ export function getExportTools(bridgeOptions: BridgeOptions) {
             return __error("Save the Premiere project to a real .prproj path before AME handoff. Unsaved or scratch projects make Adobe Media Encoder resolve a Same as Project output token against a disposable folder.");
           }
           
-          encoder.launchEncoder();
-          
-          var outputFile = new File("${escapeForExtendScript(resolvedOutputPath)}");
+          var outputFile = new File("${escapeForExtendScript(outputPath)}");
           if (!outputFile.parent || !outputFile.parent.exists) {
-            return __error("The requested AME output directory does not exist: " + outputFile.parent);
+            return __error("The requested AME output directory does not exist: " + (outputFile.parent ? outputFile.parent.fsName : outputFile.fsName));
           }
           var outputPath = outputFile.fsName;
-          var presetPath = "${escapeForExtendScript(resolvedPresetPath)}";
+          var presetFile = new File("${escapeForExtendScript(presetPath)}");
+          if (!presetFile.exists) return __error("AME preset file does not exist: " + presetFile.fsName);
+          var presetPath = presetFile.fsName;
+          encoder.launchEncoder();
           
           var jobId = encoder.encodeSequence(
             seq,
@@ -1265,16 +1268,14 @@ export function getExportTools(bridgeOptions: BridgeOptions) {
           );
           if (!jobId || String(jobId) === "0") return __error("Adobe Media Encoder did not queue the sequence export.");
           
-          // On Premiere 26.5.2 the queued job sits in AME's queue as "Ready"
-          // and never processes until someone presses the queue play button
-          // (observed live; see upstream #687). app.encoder.startBatch() is
-          // the documented CEP way to start the queue batch (#641/#323).
-          var batchStarted = "";
-          try {
-            app.encoder.startBatch();
-            batchStarted = "started";
-          } catch (startBatchError) {
-            batchStarted = "unavailable: " + (startBatchError && startBatchError.message ? startBatchError.message : startBatchError);
+          var batchStartOutcome = "not_requested";
+          if (${args.start_batch === true ? "true" : "false"}) {
+            try {
+              app.encoder.startBatch();
+              batchStartOutcome = "requested";
+            } catch (startBatchError) {
+              batchStartOutcome = "unavailable: " + (startBatchError && startBatchError.message ? startBatchError.message : startBatchError);
+            }
           }
           
           return __result({
@@ -1284,8 +1285,10 @@ export function getExportTools(bridgeOptions: BridgeOptions) {
             jobId: String(jobId),
             outputPath: outputPath,
             savedProjectPath: savedProjectPath,
-            queueBatchStart: batchStarted,
-            verificationScope: "Premiere returned an AME job ID and the queue batch was started. Output-file creation is not verified by this tool."
+            queueBatchStart: batchStartOutcome,
+            verificationScope: batchStartOutcome === "requested"
+              ? "Premiere returned an AME job ID and accepted a request to start all ready AME jobs. Batch startup and output-file creation are not verified by this tool."
+              : "Premiere returned an AME job ID. Batch startup and output-file creation are not verified by this tool."
           });
         `);
         return sendCommand(script, bridgeOptions);

@@ -606,19 +606,19 @@ export function getProjectTools(bridgeOptions: BridgeOptions) {
               var audioClip = __placedOn(seq.audioTracks[a], p.item, startTicks);
               if (audioClip) audioClip.remove(false, false);
             }
-            var scaled = false;
-            if (p.scale !== 100) {
+            var scaled = p.scale === 100;
+            if (!scaled) {
               for (var q = 0; q < placed.components.numItems && !scaled; q++) {
                 var component = placed.components[q];
-                if (component.matchName !== "AE.ADBE Motion" && component.displayName !== "Motion") continue;
-                for (var r = 0; r < component.properties.numItems; r++) {
-                  if (component.properties[r].displayName === "Scale") {
-                    component.properties[r].setValue(p.scale, true);
-                    scaled = true;
-                    break;
-                  }
+                if (component.matchName !== "AE.ADBE Motion") continue;
+                // Display names are localised ("Echelle" in French): Scale is the Motion property after Position.
+                var scaleProperty = component.properties.numItems > 1 ? component.properties[1] : null;
+                if (scaleProperty) {
+                  scaleProperty.setValue(p.scale, true);
+                  scaled = Math.abs(scaleProperty.getValue() - p.scale) < 0.01;
                 }
               }
+              if (!scaled) return __error("Could not set the Motion scale of " + p.comp + " to " + p.scale + " %, after " + results.length + " placement(s).");
             }
             results.push({
               comp: p.comp,

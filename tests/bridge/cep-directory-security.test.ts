@@ -1,5 +1,5 @@
 import { createRequire } from "node:module";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join, posix, win32 } from "node:path";
 import { runInNewContext } from "node:vm";
 import { describe, expect, it, vi } from "vitest";
@@ -468,7 +468,7 @@ function panelHarness(
   const modules: Record<string, unknown> = {
     fs,
     path: require("node:path"),
-    os: { platform: () => "linux", tmpdir: () => "/tmp" },
+    os: { platform: () => "linux", tmpdir: () => "/tmp", homedir: () => "/home/test" },
     process: { env: {}, getuid: () => 1000 },
     https: {},
     child_process: {},
@@ -497,6 +497,8 @@ function panelHarness(
     "utf8",
   );
   runInNewContext(securitySource, context, { filename: `${pluginDirectory}/bridge-directory-security.cjs` });
+  const configPath = join(root, pluginDirectory, "bridge-config.cjs");
+  if (existsSync(configPath)) runInNewContext(readFileSync(configPath, "utf8"), context, { filename: `${pluginDirectory}/bridge-config.cjs` });
   const mainSource = readFileSync(join(root, pluginDirectory, "main.js"), "utf8");
   runInNewContext(mainSource, context, { filename: `${pluginDirectory}/main.js` });
   return { context, elements, timers, writeFileSync, setInterval };

@@ -107,6 +107,36 @@ var bridgeDirectorySecurity = MCPBridgeDirectorySecurity.createBridgeDirectorySe
   childProcess: childProcess,
   Buffer: Buffer,
 });
+var bridgeConfig = MCPBridgeConfig.createBridgeConfig({ fs: fs, path: path, os: os, process: nodeProcess });
+var hostPaths = [nodeProcess.execPath];
+try {
+  hostPaths.push(cs.getSystemPath("hostApplication"));
+} catch (e) {}
+// Second folder served next to tempDir, named by the BTS-Prod config file.
+var configuredDir = null;
+
+function refreshConfiguredDir() {
+  var dir = bridgeConfig.read(hostPaths);
+  if (dir && path.resolve(dir) === path.resolve(tempDir)) dir = null;
+  if (dir === configuredDir && (!dir || fs.existsSync(dir))) return;
+  if (!dir) {
+    configuredDir = null;
+    log("Configured bridge folder off");
+    return;
+  }
+  try {
+    configuredDir = ensureDir(dir);
+    log("Also serving configured bridge folder: " + configuredDir, "ok");
+  } catch (e) {
+    configuredDir = null;
+    log("Configured bridge folder rejected: " + e.message, "err");
+  }
+}
+
+function servedDirs() {
+  return [tempDir, configuredDir].filter(function (d) { return !!d; });
+}
+
 function defaultBridgeDirectory() {
   try {
     var nodeProcess = nodeRequire("process");
@@ -189,15 +219,17 @@ function ensureDir(dir) {
 }
 
 function listCommandFiles() {
-  try {
-    if (!fs.existsSync(tempDir)) return [];
-    var files = fs.readdirSync(tempDir);
-    return files
-      .filter(function (f) { return f.indexOf("cmd_") === 0 && f.slice(-4) === ".jsx"; })
-      .sort(); // process in order
-  } catch (e) {
-    return [];
-  }
+  var found = [];
+  servedDirs().forEach(function (dir) {
+    try {
+      if (!fs.existsSync(dir)) return;
+      fs.readdirSync(dir)
+        .filter(function (f) { return f.indexOf("cmd_") === 0 && f.slice(-4) === ".jsx"; })
+        .sort() // process in order
+        .forEach(function (f) { found.push({ dir: dir, name: f }); });
+    } catch (e) {}
+  });
+  return found;
 }
 
 function readFile(filePath) {
@@ -243,17 +275,20 @@ function deleteFile(filePath) {
 // server never observes partial JSON, and an older server can ignore it.
 function writeBridgeHeartbeat() {
   if (!tempDir) return;
-  var heartbeatPath = path.join(tempDir, "bridge-heartbeat.json");
-  var stagedPath = heartbeatPath + "." + ENGINE_ID + ".staged";
-  try {
-    fs.writeFileSync(stagedPath, JSON.stringify({
-      protocolVersion: 1,
-      state: bridgeRunning ? "running" : "waiting"
-    }), "utf-8");
-    fs.renameSync(stagedPath, heartbeatPath);
-  } catch (e) {
-    deleteFile(stagedPath);
-  }
+  refreshConfiguredDir();
+  servedDirs().forEach(function (dir) {
+    var heartbeatPath = path.join(dir, "bridge-heartbeat.json");
+    var stagedPath = heartbeatPath + "." + ENGINE_ID + ".staged";
+    try {
+      fs.writeFileSync(stagedPath, JSON.stringify({
+        protocolVersion: 1,
+        state: bridgeRunning ? "running" : "waiting"
+      }), "utf-8");
+      fs.renameSync(stagedPath, heartbeatPath);
+    } catch (e) {
+      deleteFile(stagedPath);
+    }
+  });
 }
 
 function startBridgeHeartbeat() {
@@ -286,7 +321,7 @@ function processCommands() {
   // at once lets overlapping edits race each other and overload the host. The
   // atomic claim below still prevents duplicate work across the visible and
   // headless panels, while this panel dispatches strictly one command at a time.
-  if (cmdFiles.length > 0) processOneCommand(cmdFiles[0]);
+  if (cmdFiles.length > 0) processOneCommand(cmdFiles[0].dir, cmdFiles[0].name);
 }
 
 // Both the visible panel and the headless auto-start instance run this file.
@@ -295,8 +330,8 @@ function processCommands() {
 var ENGINE_ID = Math.random().toString(36).slice(2, 8);
 var commandInFlight = false;
 
-function processOneCommand(cmdFileName) {
-  var cmdFilePath = path.join(tempDir, cmdFileName);
+function processOneCommand(dir, cmdFileName) {
+  var cmdFilePath = path.join(dir, cmdFileName);
   var claimPath = cmdFilePath + "." + ENGINE_ID + ".claimed";
   try {
     fs.renameSync(cmdFilePath, claimPath);
@@ -315,14 +350,14 @@ function processOneCommand(cmdFileName) {
 
   // Derive response filename: cmd_12345.jsx -> res_12345.json
   var id = cmdFileName.replace("cmd_", "").replace(".jsx", "");
-  var resFilePath = path.join(tempDir, "res_" + id + ".json");
+  var resFilePath = path.join(dir, "res_" + id + ".json");
 
   log("Executing: " + cmdFileName + " (" + script.length + " chars)", "cmd");
 
   // While evalScript is in flight, heartbeat a busy file so the MCP server can
   // tell "script still running (modal dialog?)" apart from "plugin not running".
   // Only starts after 2s, so fast commands never touch the extra file.
-  var busyFilePath = path.join(tempDir, "busy_" + id + ".json");
+  var busyFilePath = path.join(dir, "busy_" + id + ".json");
   var startedAt = new Date().getTime();
   var busyTimer = setInterval(function () {
     writeFile(busyFilePath, '{"id":"' + id + '","elapsedMs":' + (new Date().getTime() - startedAt) + "}");

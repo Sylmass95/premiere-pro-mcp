@@ -172,6 +172,9 @@ Usage:
 
 Environment variables:
   PREMIERE_TEMP_DIR     Shared temp directory (default: OS temp + /premiere-mcp-bridge)
+                        The CEP connector also serves the "bridgeDir" of ~/Library/Application Support/
+                        com.btsprod.app/premiere-bridge.json (or PREMIERE_MCP_BRIDGE_CONFIG in Premiere's
+                        environment) when its "hostApp" is the running Premiere, however Premiere was launched
   PREMIERE_TIMEOUT_MS   Command timeout in ms (default: 30000)
   PREMIERE_MCP_CAPABILITIES  Comma-separated authority profile
   PREMIERE_MCP_TOOL_PACKS    Comma-separated discovery packs: full, essential, inspection, delivery, captions

@@ -455,7 +455,7 @@ export function getProjectTools(bridgeOptions: BridgeOptions) {
 
     place_ae_comps: {
       description:
-        "Dynamic Link After Effects compositions from one .aep onto the active sequence: imports the missing comps into a bin (importAEComps), then overwrites each placement on its video track with the given in point / duration and Motion scale, drops the comps' own audio, and reads every placement back.",
+        "Dynamic Link After Effects compositions from one .aep onto the active sequence: imports the missing comps into a bin (importAEComps), then overwrites each placement on its video track with the given in point / duration, Motion scale and opacity, drops the comps' own audio, and reads every placement back.",
       parameters: {
         type: "object" as const,
         additionalProperties: false,
@@ -477,6 +477,7 @@ export function getProjectTools(bridgeOptions: BridgeOptions) {
                 in_seconds: { type: "number", minimum: 0, description: "Source in point inside the comp (default 0)" },
                 duration_seconds: { type: "number", exclusiveMinimum: 0 },
                 scale_percent: { type: "number", exclusiveMinimum: 0, description: "Motion > Scale (default 100)" },
+                opacity_percent: { type: "number", minimum: 0, maximum: 100, description: "Opacity > Opacity (default 100)" },
               },
               required: ["comp_name", "track_index", "start_seconds", "duration_seconds"],
             },
@@ -494,6 +495,7 @@ export function getProjectTools(bridgeOptions: BridgeOptions) {
           in_seconds?: number;
           duration_seconds: number;
           scale_percent?: number;
+          opacity_percent?: number;
         }>;
       }) => {
         if (typeof args.ae_project_path !== "string" || !/\.aep$/i.test(args.ae_project_path)) {
@@ -516,11 +518,14 @@ export function getProjectTools(bridgeOptions: BridgeOptions) {
           if (!finite(p.start_seconds, 0) || !finite(p.in_seconds ?? 0, 0) || !finite(p.duration_seconds, 0.001) || !finite(p.scale_percent ?? 100, 0.001)) {
             return { success: false, error: `placements[${i}] needs finite non-negative times, a positive duration and a positive scale` };
           }
+          if (p.opacity_percent !== undefined && (!finite(p.opacity_percent, 0) || p.opacity_percent > 100)) {
+            return { success: false, error: `placements[${i}].opacity_percent must be between 0 and 100` };
+          }
         }
         const aePath = escapeForExtendScript(args.ae_project_path);
         const emitted = args.placements
           .map(
-            (p) => `{ comp: "${escapeForExtendScript(p.comp_name)}", track: ${p.track_index}, start: ${p.start_seconds}, inS: ${p.in_seconds ?? 0}, dur: ${p.duration_seconds}, scale: ${p.scale_percent ?? 100} }`,
+            (p) => `{ comp: "${escapeForExtendScript(p.comp_name)}", track: ${p.track_index}, start: ${p.start_seconds}, inS: ${p.in_seconds ?? 0}, dur: ${p.duration_seconds}, scale: ${p.scale_percent ?? 100}, opacity: ${p.opacity_percent ?? 100} }`,
           )
           .join(",\n");
         const script = buildToolScript(`
@@ -620,13 +625,25 @@ export function getProjectTools(bridgeOptions: BridgeOptions) {
               }
               if (!scaled) return __error("Could not set the Motion scale of " + p.comp + " to " + p.scale + " %, after " + results.length + " placement(s).");
             }
+            var faded = p.opacity === 100;
+            for (var o = 0; o < placed.components.numItems && !faded; o++) {
+              var opacityComponent = placed.components[o];
+              if (opacityComponent.matchName !== "AE.ADBE Opacity") continue;
+              // Localised display names again ("Opacité"): Opacity is the component's first property.
+              var opacityProperty = opacityComponent.properties.numItems > 0 ? opacityComponent.properties[0] : null;
+              if (opacityProperty) {
+                opacityProperty.setValue(p.opacity, true);
+                faded = Math.abs(opacityProperty.getValue() - p.opacity) < 0.01;
+              }
+            }
             results.push({
               comp: p.comp,
               track: p.track,
               start: placed.start.seconds,
               end: placed.end.seconds,
               inPoint: placed.inPoint.seconds,
-              scaled: scaled
+              scaled: scaled,
+              opacity: faded ? p.opacity : null
             });
           }
           return __result({ placed: results.length, imported: missing.length, bin: bin.name, placements: results });

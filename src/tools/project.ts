@@ -652,6 +652,132 @@ export function getProjectTools(bridgeOptions: BridgeOptions) {
       },
     },
 
+    bts_lumetri: {
+      description:
+        "Basic Lumetri Color grading of a video track of the active sequence. action 'list': the track's clips (nodeId, start, end, source media path) and the time ranges covered by clips on the tracks above. action 'apply': adds Lumetri Color to each listed clip when missing and sets its Basic Correction temperature, tint, saturation, exposure and contrast (by property index: display names are localised), then reads them back.",
+      parameters: {
+        type: "object" as const,
+        additionalProperties: false,
+        properties: {
+          action: { type: "string", enum: ["list", "apply"], description: "list the clips, or apply grades" },
+          track_index: { type: "integer", minimum: 0, description: "Video track index (0-based)" },
+          grades: {
+            type: "array",
+            description: "action 'apply': one entry per clip",
+            maxItems: 400,
+            items: {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                node_id: { type: "string", minLength: 1 },
+                temperature: { type: "number", minimum: -100, maximum: 100 },
+                tint: { type: "number", minimum: -100, maximum: 100 },
+                saturation: { type: "number", minimum: 0, maximum: 200 },
+                exposure: { type: "number", minimum: -4, maximum: 4 },
+                contrast: { type: "number", minimum: -100, maximum: 100 },
+              },
+              required: ["node_id"],
+            },
+          },
+        },
+        required: ["action", "track_index"],
+      },
+      handler: async (args: {
+        action: "list" | "apply";
+        track_index: number;
+        grades?: Array<{ node_id: string; temperature?: number; tint?: number; saturation?: number; exposure?: number; contrast?: number }>;
+      }) => {
+        if (args.action !== "list" && args.action !== "apply") return { success: false, error: "action must be 'list' or 'apply'" };
+        if (!Number.isSafeInteger(args.track_index) || args.track_index < 0) {
+          return { success: false, error: "track_index must be a non-negative integer" };
+        }
+        const grades = args.action === "apply" ? (args.grades ?? []) : [];
+        const num = (v: unknown, min: number, max: number) => v === undefined || (typeof v === "number" && Number.isFinite(v) && v >= min && v <= max);
+        for (const [i, g] of grades.entries()) {
+          if (typeof g?.node_id !== "string" || !g.node_id) return { success: false, error: `grades[${i}].node_id must be a non-empty string` };
+          if (!num(g.temperature, -100, 100) || !num(g.tint, -100, 100) || !num(g.saturation, 0, 200) || !num(g.exposure, -4, 4) || !num(g.contrast, -100, 100)) {
+            return { success: false, error: `grades[${i}] has an out-of-range value` };
+          }
+        }
+        const value = (v: number | undefined) => (v === undefined ? "null" : String(v));
+        const emitted = grades
+          .map((g) => `{ id: "${escapeForExtendScript(g.node_id)}", v: [${value(g.temperature)}, ${value(g.tint)}, ${value(g.saturation)}, ${value(g.exposure)}, ${value(g.contrast)}] }`)
+          .join(",\n");
+        const script = buildToolScript(`
+          var seq = app.project.activeSequence;
+          if (!seq) return __error("No active sequence");
+          if (${args.track_index} >= seq.videoTracks.numTracks) return __error("Video track index ${args.track_index} is out of range");
+          var track = seq.videoTracks[${args.track_index}];
+          var i, k;
+          if ("${args.action}" === "list") {
+            var clips = [];
+            for (i = 0; i < track.clips.numItems; i++) {
+              var c = track.clips[i];
+              var media = "";
+              try { media = c.projectItem ? String(c.projectItem.getMediaPath()) : ""; } catch (eMedia) {}
+              clips.push({ nodeId: String(c.nodeId), start: c.start.seconds, end: c.end.seconds, mediaPath: media });
+            }
+            var covered = [];
+            for (var t = ${args.track_index} + 1; t < seq.videoTracks.numTracks; t++) {
+              var above = seq.videoTracks[t];
+              for (i = 0; i < above.clips.numItems; i++) covered.push([above.clips[i].start.seconds, above.clips[i].end.seconds]);
+            }
+            return __result({ clips: clips, covered: covered });
+          }
+
+          var grades = [${emitted}];
+          var byId = {};
+          for (i = 0; i < track.clips.numItems; i++) byId[String(track.clips[i].nodeId)] = track.clips[i];
+          for (i = 0; i < grades.length; i++) {
+            if (!byId[grades[i].id]) return __error("Clip " + grades[i].id + " is not on V${args.track_index + 1}. Nothing was changed.");
+          }
+          app.enableQE();
+          var qeSeq = qe.project.getActiveSequence();
+          if (!qeSeq) return __error("No active sequence (QE)");
+          var qeTrack = qeSeq.getVideoTrackAt(${args.track_index});
+          var effect = null;
+          var list = qe.project.getVideoEffectList();
+          for (i = 0; i < list.length && !effect; i++) {
+            if (/lumetri/i.test(String(list[i]))) effect = qe.project.getVideoEffectByName(String(list[i]));
+          }
+          if (!effect) return __error("Lumetri Color is not in Premiere's video effect list");
+          function __lumetri(clip) {
+            for (var q = 0; q < clip.components.numItems; q++) {
+              if (clip.components[q].matchName === "AE.ADBE Lumetri") return clip.components[q];
+            }
+            return null;
+          }
+          // Basic Correction > Temperature, Tint, Saturation, Exposure, Contrast (Premiere 25 / 26 order).
+          var INDEX = [14, 15, 16, 19, 20];
+          var results = [];
+          for (i = 0; i < grades.length; i++) {
+            var clip = byId[grades[i].id];
+            var lumetri = __lumetri(clip);
+            if (!lumetri) {
+              var qeClip = __findQeClipByDomClip(qeTrack, clip);
+              if (!qeClip) return __error("Could not match the QE clip of " + grades[i].id + ", after " + results.length + " clip(s).");
+              qeClip.addVideoEffect(effect);
+              lumetri = __lumetri(clip);
+              if (!lumetri) return __error("Premiere did not add Lumetri Color to " + grades[i].id + ", after " + results.length + " clip(s).");
+            }
+            if (lumetri.properties.numItems <= INDEX[INDEX.length - 1]) return __error("Unexpected Lumetri Color layout (" + lumetri.properties.numItems + " properties)");
+            var read = [];
+            for (k = 0; k < INDEX.length; k++) {
+              var prop = lumetri.properties[INDEX[k]];
+              var want = grades[i].v[k];
+              if (want !== null) prop.setValue(want, true);
+              var got = prop.getValue();
+              if (want !== null && Math.abs(got - want) > 0.01) return __error("Lumetri property " + INDEX[k] + " of " + grades[i].id + " reads " + got + " instead of " + want);
+              read.push(got);
+            }
+            results.push({ nodeId: grades[i].id, temperature: read[0], tint: read[1], saturation: read[2], exposure: read[3], contrast: read[4] });
+          }
+          return __result({ graded: results.length, clips: results });
+        `);
+        return sendCommand(script, { ...bridgeOptions, timeoutMs: Math.max(bridgeOptions.timeoutMs ?? 0, 600_000) });
+      },
+    },
+
     delete_bin: {
       description: "Delete a bin (folder) from the project panel",
       parameters: {

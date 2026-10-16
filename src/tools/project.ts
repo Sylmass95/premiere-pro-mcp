@@ -778,6 +778,188 @@ export function getProjectTools(bridgeOptions: BridgeOptions) {
       },
     },
 
+    bts_place_clips: {
+      description:
+        "Overwrite ranges of media files onto tracks of the active sequence without touching the other tracks: imports the missing files into a bin, then for each placement sets the item's in / out, overwrites it at its start (video placements on their video track, audio ones on their audio track; the counterpart lands on the given empty scratch track and is removed), sets the Motion scale or the Volume level, and reads every placement back.",
+      parameters: {
+        type: "object" as const,
+        additionalProperties: false,
+        properties: {
+          bin_name: { type: "string", description: "Root-level bin receiving the files (created when missing)" },
+          scratch_video_track: { type: "integer", minimum: 0, description: "Empty video track taking the video of audio placements" },
+          scratch_audio_track: { type: "integer", minimum: 0, description: "Empty audio track taking the audio of video placements" },
+          placements: {
+            type: "array",
+            description: "Ranges to place, each with its kind, track, start, source in point and duration",
+            minItems: 1,
+            maxItems: 64,
+            items: {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                path: { type: "string", minLength: 1, maxLength: 2048 },
+                kind: { type: "string", enum: ["video", "audio"] },
+                track_index: { type: "integer", minimum: 0, description: "0-based track of that kind" },
+                start_seconds: { type: "number", minimum: 0 },
+                in_seconds: { type: "number", minimum: 0 },
+                duration_seconds: { type: "number", exclusiveMinimum: 0 },
+                scale_percent: { type: "number", exclusiveMinimum: 0, description: "video: Motion > Scale" },
+                level_db: { type: "number", minimum: -96, maximum: 15, description: "audio: Volume > Level" },
+              },
+              required: ["path", "kind", "track_index", "start_seconds", "duration_seconds"],
+            },
+          },
+        },
+        required: ["bin_name", "scratch_video_track", "scratch_audio_track", "placements"],
+      },
+      handler: async (args: {
+        bin_name: string;
+        scratch_video_track: number;
+        scratch_audio_track: number;
+        placements: Array<{
+          path: string;
+          kind: "video" | "audio";
+          track_index: number;
+          start_seconds: number;
+          in_seconds?: number;
+          duration_seconds: number;
+          scale_percent?: number;
+          level_db?: number;
+        }>;
+      }) => {
+        if (typeof args.bin_name !== "string" || !args.bin_name.trim()) return { success: false, error: "bin_name must be a non-empty string" };
+        if (!Number.isSafeInteger(args.scratch_video_track) || args.scratch_video_track < 0 || !Number.isSafeInteger(args.scratch_audio_track) || args.scratch_audio_track < 0) {
+          return { success: false, error: "scratch tracks must be non-negative integers" };
+        }
+        if (!Array.isArray(args.placements) || args.placements.length < 1 || args.placements.length > 64) {
+          return { success: false, error: "placements must contain between 1 and 64 entries" };
+        }
+        const finite = (v: unknown, min: number) => typeof v === "number" && Number.isFinite(v) && v >= min;
+        for (const [i, p] of args.placements.entries()) {
+          if (typeof p?.path !== "string" || !p.path) return { success: false, error: `placements[${i}].path must be a non-empty string` };
+          if (p.kind !== "video" && p.kind !== "audio") return { success: false, error: `placements[${i}].kind must be video or audio` };
+          if (!Number.isSafeInteger(p.track_index) || p.track_index < 0) return { success: false, error: `placements[${i}].track_index must be a non-negative integer` };
+          if (p.kind === "video" ? p.track_index === args.scratch_video_track : p.track_index === args.scratch_audio_track) {
+            return { success: false, error: `placements[${i}] targets the scratch track` };
+          }
+          if (!finite(p.start_seconds, 0) || !finite(p.in_seconds ?? 0, 0) || !finite(p.duration_seconds, 0.001) || !finite(p.scale_percent ?? 100, 0.001)) {
+            return { success: false, error: `placements[${i}] needs finite non-negative times, a positive duration and a positive scale` };
+          }
+          if (p.level_db !== undefined && (!finite(p.level_db, -96) || p.level_db > 15)) return { success: false, error: `placements[${i}].level_db must be between -96 and 15` };
+        }
+        const emitted = args.placements
+          .map(
+            (p) =>
+              `{ path: "${escapeForExtendScript(p.path)}", video: ${p.kind === "video"}, track: ${p.track_index}, start: ${p.start_seconds}, inS: ${p.in_seconds ?? 0}, dur: ${p.duration_seconds}, scale: ${p.scale_percent ?? 100}, level: ${p.level_db ?? "null"} }`,
+          )
+          .join(",\n");
+        const binName = escapeForExtendScript(args.bin_name);
+        const script = buildToolScript(`
+          var seq = app.project.activeSequence;
+          if (!seq) return __error("No active sequence");
+          var placements = [${emitted}];
+          var scratchV = ${args.scratch_video_track};
+          var scratchA = ${args.scratch_audio_track};
+          var i, c, k;
+          if (scratchV >= seq.videoTracks.numTracks || scratchA >= seq.audioTracks.numTracks) return __error("Scratch track out of range. Nothing was placed.");
+          if (seq.videoTracks[scratchV].clips.numItems > 0 || seq.audioTracks[scratchA].clips.numItems > 0) return __error("Scratch tracks must be empty. Nothing was placed.");
+          for (i = 0; i < placements.length; i++) {
+            var count = placements[i].video ? seq.videoTracks.numTracks : seq.audioTracks.numTracks;
+            if (placements[i].track >= count) return __error("Track " + placements[i].track + " out of range for placement " + i + ". Nothing was placed.");
+            if (!new File(placements[i].path).exists) return __error("File not found: " + placements[i].path + ". Nothing was placed.");
+          }
+
+          var root = app.project.rootItem;
+          var bin = null;
+          for (c = 0; c < root.children.numItems; c++) {
+            if (root.children[c].type === ProjectItemType.BIN && root.children[c].name === "${binName}") bin = root.children[c];
+          }
+          if (!bin) bin = root.createBin("${binName}");
+          if (!bin) return __error("Could not create the bin ${binName}");
+          function __same(a, b) { return String(a).replace(/\\\\/g, "/").toLowerCase() === String(b).replace(/\\\\/g, "/").toLowerCase(); }
+          function __itemFor(path) {
+            for (var n = 0; n < bin.children.numItems; n++) {
+              var child = bin.children[n];
+              var media = "";
+              try { media = child.getMediaPath(); } catch (e0) {}
+              if (media && __same(media, path)) return child;
+            }
+            return null;
+          }
+          var missing = [];
+          var seen = {};
+          for (i = 0; i < placements.length; i++) {
+            var p0 = placements[i].path;
+            if (!seen[p0] && !__itemFor(p0)) missing.push(p0);
+            seen[p0] = true;
+          }
+          if (missing.length > 0) {
+            try { app.project.importFiles(missing, true, bin, false); } catch (importError) { return __error("importFiles failed: " + importError.toString()); }
+          }
+          for (i = 0; i < placements.length; i++) {
+            placements[i].item = __itemFor(placements[i].path);
+            if (!placements[i].item) return __error("File not imported: " + placements[i].path + ". Nothing was placed.");
+          }
+
+          var frameTicks = seq.timebase ? parseFloat(seq.timebase) : NaN;
+          if (!frameTicks || isNaN(frameTicks)) frameTicks = TICKS_PER_SECOND / 25;
+          function __placedOn(track, item, startTicks) {
+            for (var m = 0; m < track.clips.numItems; m++) {
+              var clip = track.clips[m];
+              var id = "";
+              try { id = clip.projectItem ? String(clip.projectItem.nodeId) : ""; } catch (e1) {}
+              if (id === String(item.nodeId) && Math.abs(parseFloat(clip.start.ticks) - startTicks) <= frameTicks) return clip;
+            }
+            return null;
+          }
+          function __component(clip, re) {
+            for (var q = 0; q < clip.components.numItems; q++) if (re.test(clip.components[q].matchName)) return clip.components[q];
+            return null;
+          }
+          var results = [];
+          for (i = 0; i < placements.length; i++) {
+            var p = placements[i];
+            var startTicks = __secondsToTicks(p.start);
+            try {
+              p.item.setInPoint(p.inS, 4);
+              p.item.setOutPoint(p.inS + p.dur, 4);
+            } catch (pointError) {
+              return __error("Could not set the in / out points of " + p.path + ": " + pointError.toString());
+            }
+            try {
+              seq.overwriteClip(p.item, startTicks.toString(), p.video ? p.track : scratchV, p.video ? scratchA : p.track);
+            } catch (overwriteError) {
+              return __error("overwriteClip failed for " + p.path + " after " + results.length + " placement(s): " + overwriteError.toString());
+            }
+            var placed = __placedOn(p.video ? seq.videoTracks[p.track] : seq.audioTracks[p.track], p.item, startTicks);
+            if (!placed) return __error("Premiere did not place " + p.path + " at " + p.start + " s, after " + results.length + " placement(s).");
+            var scratch = __placedOn(p.video ? seq.audioTracks[scratchA] : seq.videoTracks[scratchV], p.item, startTicks);
+            if (scratch) scratch.remove(false, false);
+            var applied = null;
+            if (p.video && p.scale !== 100) {
+              var motion = __component(placed, /^AE\\.ADBE Motion$/);
+              // Display names are localised: Scale is the Motion property after Position.
+              var scaleProperty = motion && motion.properties.numItems > 1 ? motion.properties[1] : null;
+              if (!scaleProperty) return __error("No Motion scale on " + p.path + ", after " + results.length + " placement(s).");
+              scaleProperty.setValue(p.scale, true);
+              applied = scaleProperty.getValue();
+            }
+            if (!p.video && p.level !== null) {
+              var volume = __component(placed, /volume/i);
+              // Bypass, then Level, stored as 10^((dB - 15) / 20).
+              var levelProperty = volume && volume.properties.numItems > 1 ? volume.properties[1] : null;
+              if (!levelProperty) return __error("No Volume level on " + p.path + ", after " + results.length + " placement(s).");
+              levelProperty.setValue(Math.pow(10, (p.level - 15) / 20), true);
+              applied = 20 * Math.log(levelProperty.getValue()) / Math.LN10 + 15;
+            }
+            results.push({ path: p.path, video: p.video, track: p.track, start: placed.start.seconds, end: placed.end.seconds, inPoint: placed.inPoint.seconds, applied: applied });
+          }
+          return __result({ placed: results.length, imported: missing.length, placements: results });
+        `);
+        return sendCommand(script, { ...bridgeOptions, timeoutMs: Math.max(bridgeOptions.timeoutMs ?? 0, 600_000) });
+      },
+    },
+
     delete_bin: {
       description: "Delete a bin (folder) from the project panel",
       parameters: {

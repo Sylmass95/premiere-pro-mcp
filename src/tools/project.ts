@@ -780,7 +780,7 @@ export function getProjectTools(bridgeOptions: BridgeOptions) {
 
     bts_place_clips: {
       description:
-        "Overwrite ranges of media files onto tracks of the active sequence without touching the other tracks: imports the missing files into a bin, then for each placement sets the item's in / out, overwrites it at its start (video placements on their video track, audio ones on their audio track; the counterpart lands on the given empty scratch track and is removed), sets the Motion scale or the Volume level, and reads every placement back.",
+        "Overwrite ranges of media files onto tracks of the active sequence without touching the other tracks: optionally opens gaps first (every clip of every track starting at or after a gap moves later by its length), imports the missing files into a bin, then for each placement sets the item's in / out, overwrites it at its start (video placements on their video track, audio ones on their audio track; the counterpart lands on the given empty scratch track and is removed), sets the Motion scale or the Volume level (constant, or keyframed at media times), and reads every placement back.",
       parameters: {
         type: "object" as const,
         additionalProperties: false,
@@ -788,6 +788,20 @@ export function getProjectTools(bridgeOptions: BridgeOptions) {
           bin_name: { type: "string", description: "Root-level bin receiving the files (created when missing)" },
           scratch_video_track: { type: "integer", minimum: 0, description: "Empty video track taking the video of audio placements" },
           scratch_audio_track: { type: "integer", minimum: 0, description: "Empty audio track taking the audio of video placements" },
+          gaps: {
+            type: "array",
+            description: "Room to open before placing: at each time, every clip starting there or later moves by the duration",
+            maxItems: 200,
+            items: {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                at_seconds: { type: "number", minimum: 0, description: "Sequence time of the gap" },
+                duration_seconds: { type: "number", exclusiveMinimum: 0, description: "Length of the gap" },
+              },
+              required: ["at_seconds", "duration_seconds"],
+            },
+          },
           placements: {
             type: "array",
             description: "Ranges to place, each with its kind, track, start, source in point and duration",
@@ -805,6 +819,12 @@ export function getProjectTools(bridgeOptions: BridgeOptions) {
                 duration_seconds: { type: "number", exclusiveMinimum: 0 },
                 scale_percent: { type: "number", exclusiveMinimum: 0, description: "video: Motion > Scale" },
                 level_db: { type: "number", minimum: -96, maximum: 15, description: "audio: Volume > Level" },
+                level_keys: {
+                  type: "array",
+                  description: "audio: Volume > Level keyframes, [media time in seconds, dB] (media time = in point + offset in the clip)",
+                  maxItems: 2000,
+                  items: { type: "array", minItems: 2, maxItems: 2, items: { type: "number" } },
+                },
               },
               required: ["path", "kind", "track_index", "start_seconds", "duration_seconds"],
             },
@@ -816,6 +836,7 @@ export function getProjectTools(bridgeOptions: BridgeOptions) {
         bin_name: string;
         scratch_video_track: number;
         scratch_audio_track: number;
+        gaps?: Array<{ at_seconds: number; duration_seconds: number }>;
         placements: Array<{
           path: string;
           kind: "video" | "audio";
@@ -825,6 +846,7 @@ export function getProjectTools(bridgeOptions: BridgeOptions) {
           duration_seconds: number;
           scale_percent?: number;
           level_db?: number;
+          level_keys?: Array<[number, number]>;
         }>;
       }) => {
         if (typeof args.bin_name !== "string" || !args.bin_name.trim()) return { success: false, error: "bin_name must be a non-empty string" };
@@ -846,11 +868,18 @@ export function getProjectTools(bridgeOptions: BridgeOptions) {
             return { success: false, error: `placements[${i}] needs finite non-negative times, a positive duration and a positive scale` };
           }
           if (p.level_db !== undefined && (!finite(p.level_db, -96) || p.level_db > 15)) return { success: false, error: `placements[${i}].level_db must be between -96 and 15` };
+          for (const k of p.level_keys ?? []) {
+            if (!Array.isArray(k) || !finite(k[0], 0) || !finite(k[1], -96) || k[1] > 15) return { success: false, error: `placements[${i}].level_keys must be [seconds >= 0, dB in -96..15] pairs` };
+          }
+        }
+        const gaps = args.gaps ?? [];
+        for (const [i, g] of gaps.entries()) {
+          if (!finite(g?.at_seconds, 0) || !finite(g?.duration_seconds, 0.001)) return { success: false, error: `gaps[${i}] needs a time >= 0 and a positive duration` };
         }
         const emitted = args.placements
           .map(
             (p) =>
-              `{ path: "${escapeForExtendScript(p.path)}", video: ${p.kind === "video"}, track: ${p.track_index}, start: ${p.start_seconds}, inS: ${p.in_seconds ?? 0}, dur: ${p.duration_seconds}, scale: ${p.scale_percent ?? 100}, level: ${p.level_db ?? "null"} }`,
+              `{ path: "${escapeForExtendScript(p.path)}", video: ${p.kind === "video"}, track: ${p.track_index}, start: ${p.start_seconds}, inS: ${p.in_seconds ?? 0}, dur: ${p.duration_seconds}, scale: ${p.scale_percent ?? 100}, level: ${p.level_db ?? "null"}, keys: ${JSON.stringify(p.level_keys ?? [])} }`,
           )
           .join(",\n");
         const binName = escapeForExtendScript(args.bin_name);
@@ -858,6 +887,7 @@ export function getProjectTools(bridgeOptions: BridgeOptions) {
           var seq = app.project.activeSequence;
           if (!seq) return __error("No active sequence");
           var placements = [${emitted}];
+          var gaps = ${JSON.stringify([...gaps].sort((a, b) => b.at_seconds - a.at_seconds))};
           var scratchV = ${args.scratch_video_track};
           var scratchA = ${args.scratch_audio_track};
           var i, c, k;
@@ -896,13 +926,37 @@ export function getProjectTools(bridgeOptions: BridgeOptions) {
           if (missing.length > 0) {
             try { app.project.importFiles(missing, true, bin, false); } catch (importError) { return __error("importFiles failed: " + importError.toString()); }
           }
+          // A video file can show up in the bin a moment after importFiles returns.
+          for (var wait = 0; wait < 100; wait++) {
+            var all = true;
+            for (i = 0; i < placements.length; i++) if (!placements[i].item && !(placements[i].item = __itemFor(placements[i].path))) all = false;
+            if (all) break;
+            $.sleep(100);
+          }
           for (i = 0; i < placements.length; i++) {
-            placements[i].item = __itemFor(placements[i].path);
             if (!placements[i].item) return __error("File not imported: " + placements[i].path + ". Nothing was placed.");
           }
 
           var frameTicks = seq.timebase ? parseFloat(seq.timebase) : NaN;
           if (!frameTicks || isNaN(frameTicks)) frameTicks = TICKS_PER_SECOND / 25;
+
+          // Latest gap first, each track's clips from the last one: nothing moves onto a clip not moved yet.
+          var moved = 0;
+          var half = frameTicks / 2 / TICKS_PER_SECOND;
+          function __rippleTrack(track, g) {
+            for (var r = track.clips.numItems - 1; r >= 0; r--) {
+              var item = track.clips[r];
+              if (item.start.seconds < g.at_seconds - half) break;
+              var shift = new Time();
+              shift.seconds = g.duration_seconds;
+              item.move(shift);
+              moved++;
+            }
+          }
+          for (var gi = 0; gi < gaps.length; gi++) {
+            for (var tv = 0; tv < seq.videoTracks.numTracks; tv++) __rippleTrack(seq.videoTracks[tv], gaps[gi]);
+            for (var ta = 0; ta < seq.audioTracks.numTracks; ta++) __rippleTrack(seq.audioTracks[ta], gaps[gi]);
+          }
           function __placedOn(track, item, startTicks) {
             for (var m = 0; m < track.clips.numItems; m++) {
               var clip = track.clips[m];
@@ -944,17 +998,27 @@ export function getProjectTools(bridgeOptions: BridgeOptions) {
               scaleProperty.setValue(p.scale, true);
               applied = scaleProperty.getValue();
             }
-            if (!p.video && p.level !== null) {
-              var volume = __component(placed, /volume/i);
+            if (!p.video && (p.level !== null || p.keys.length > 0)) {
+              var volume = __component(placed, /^Internal Volume/) || __component(placed, /volume/i);
               // Bypass, then Level, stored as 10^((dB - 15) / 20).
               var levelProperty = volume && volume.properties.numItems > 1 ? volume.properties[1] : null;
               if (!levelProperty) return __error("No Volume level on " + p.path + ", after " + results.length + " placement(s).");
-              levelProperty.setValue(Math.pow(10, (p.level - 15) / 20), true);
-              applied = 20 * Math.log(levelProperty.getValue()) / Math.LN10 + 15;
+              var gain = function (db) { return Math.pow(10, (db - 15) / 20); };
+              if (p.keys.length > 0) {
+                levelProperty.setTimeVarying(true);
+                for (var lk = 0; lk < p.keys.length; lk++) {
+                  levelProperty.addKey(p.keys[lk][0]);
+                  levelProperty.setValueAtKey(p.keys[lk][0], gain(p.keys[lk][1]), true);
+                }
+                applied = levelProperty.getKeys().length;
+              } else {
+                levelProperty.setValue(gain(p.level), true);
+                applied = 20 * Math.log(levelProperty.getValue()) / Math.LN10 + 15;
+              }
             }
             results.push({ path: p.path, video: p.video, track: p.track, start: placed.start.seconds, end: placed.end.seconds, inPoint: placed.inPoint.seconds, applied: applied });
           }
-          return __result({ placed: results.length, imported: missing.length, placements: results });
+          return __result({ placed: results.length, imported: missing.length, moved: moved, placements: results });
         `);
         return sendCommand(script, { ...bridgeOptions, timeoutMs: Math.max(bridgeOptions.timeoutMs ?? 0, 600_000) });
       },

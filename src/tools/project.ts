@@ -780,7 +780,7 @@ export function getProjectTools(bridgeOptions: BridgeOptions) {
 
     bts_place_clips: {
       description:
-        "Overwrite ranges of media files onto tracks of the active sequence without touching the other tracks: optionally opens gaps first (every clip of every track starting at or after a gap moves later by its length), imports the missing files into a bin, then for each placement sets the item's in / out, overwrites it at its start (video placements on their video track, audio ones on their audio track; the counterpart lands on the given empty scratch track and is removed), sets the Motion scale or the Volume level (constant, or keyframed at media times), and reads every placement back.",
+        "Overwrite ranges of media files onto tracks of the active sequence without touching the other tracks: optionally opens gaps first (every clip of every track starting at or after a gap moves later by its length), imports the missing files into a bin, then for each placement sets the item's in / out, overwrites it at its start (video placements on their video track, audio ones on their audio track; the counterpart lands on the given empty scratch track and is removed), sets the Motion scale or the Volume level (each constant, or keyframed at media times), and reads every placement back.",
       parameters: {
         type: "object" as const,
         additionalProperties: false,
@@ -825,6 +825,12 @@ export function getProjectTools(bridgeOptions: BridgeOptions) {
                   maxItems: 2000,
                   items: { type: "array", minItems: 2, maxItems: 2, items: { type: "number" } },
                 },
+                scale_keys: {
+                  type: "array",
+                  description: "video: Motion > Scale keyframes, [media time in seconds, percent] (media time = in point + offset in the clip)",
+                  maxItems: 2000,
+                  items: { type: "array", minItems: 2, maxItems: 2, items: { type: "number" } },
+                },
               },
               required: ["path", "kind", "track_index", "start_seconds", "duration_seconds"],
             },
@@ -847,6 +853,7 @@ export function getProjectTools(bridgeOptions: BridgeOptions) {
           scale_percent?: number;
           level_db?: number;
           level_keys?: Array<[number, number]>;
+          scale_keys?: Array<[number, number]>;
         }>;
       }) => {
         if (typeof args.bin_name !== "string" || !args.bin_name.trim()) return { success: false, error: "bin_name must be a non-empty string" };
@@ -871,6 +878,9 @@ export function getProjectTools(bridgeOptions: BridgeOptions) {
           for (const k of p.level_keys ?? []) {
             if (!Array.isArray(k) || !finite(k[0], 0) || !finite(k[1], -96) || k[1] > 15) return { success: false, error: `placements[${i}].level_keys must be [seconds >= 0, dB in -96..15] pairs` };
           }
+          for (const k of p.scale_keys ?? []) {
+            if (!Array.isArray(k) || !finite(k[0], 0) || !finite(k[1], 0.001)) return { success: false, error: `placements[${i}].scale_keys must be [seconds >= 0, percent > 0] pairs` };
+          }
         }
         const gaps = args.gaps ?? [];
         for (const [i, g] of gaps.entries()) {
@@ -879,7 +889,7 @@ export function getProjectTools(bridgeOptions: BridgeOptions) {
         const emitted = args.placements
           .map(
             (p) =>
-              `{ path: "${escapeForExtendScript(p.path)}", video: ${p.kind === "video"}, track: ${p.track_index}, start: ${p.start_seconds}, inS: ${p.in_seconds ?? 0}, dur: ${p.duration_seconds}, scale: ${p.scale_percent ?? 100}, level: ${p.level_db ?? "null"}, keys: ${JSON.stringify(p.level_keys ?? [])} }`,
+              `{ path: "${escapeForExtendScript(p.path)}", video: ${p.kind === "video"}, track: ${p.track_index}, start: ${p.start_seconds}, inS: ${p.in_seconds ?? 0}, dur: ${p.duration_seconds}, scale: ${p.scale_percent ?? 100}, level: ${p.level_db ?? "null"}, keys: ${JSON.stringify(p.level_keys ?? [])}, scaleKeys: ${JSON.stringify(p.scale_keys ?? [])} }`,
           )
           .join(",\n");
         const binName = escapeForExtendScript(args.bin_name);
@@ -990,13 +1000,22 @@ export function getProjectTools(bridgeOptions: BridgeOptions) {
             var scratch = __placedOn(p.video ? seq.audioTracks[scratchA] : seq.videoTracks[scratchV], p.item, startTicks);
             if (scratch) scratch.remove(false, false);
             var applied = null;
-            if (p.video && p.scale !== 100) {
+            if (p.video && (p.scale !== 100 || p.scaleKeys.length > 0)) {
               var motion = __component(placed, /^AE\\.ADBE Motion$/);
               // Display names are localised: Scale is the Motion property after Position.
               var scaleProperty = motion && motion.properties.numItems > 1 ? motion.properties[1] : null;
               if (!scaleProperty) return __error("No Motion scale on " + p.path + ", after " + results.length + " placement(s).");
-              scaleProperty.setValue(p.scale, true);
-              applied = scaleProperty.getValue();
+              if (p.scaleKeys.length > 0) {
+                scaleProperty.setTimeVarying(true);
+                for (var sk = 0; sk < p.scaleKeys.length; sk++) {
+                  scaleProperty.addKey(p.scaleKeys[sk][0]);
+                  scaleProperty.setValueAtKey(p.scaleKeys[sk][0], p.scaleKeys[sk][1], true);
+                }
+                applied = scaleProperty.getKeys().length;
+              } else {
+                scaleProperty.setValue(p.scale, true);
+                applied = scaleProperty.getValue();
+              }
             }
             if (!p.video && (p.level !== null || p.keys.length > 0)) {
               var volume = __component(placed, /^Internal Volume/) || __component(placed, /volume/i);

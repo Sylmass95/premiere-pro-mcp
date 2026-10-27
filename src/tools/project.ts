@@ -1006,10 +1006,12 @@ export function getProjectTools(bridgeOptions: BridgeOptions) {
               var scaleProperty = motion && motion.properties.numItems > 1 ? motion.properties[1] : null;
               if (!scaleProperty) return __error("No Motion scale on " + p.path + ", after " + results.length + " placement(s).");
               if (p.scaleKeys.length > 0) {
+                // A still's media time starts at 1 h, not at its in point: keys follow the placed clip's own in point.
+                var keyBase = placed.inPoint.seconds - p.inS;
                 scaleProperty.setTimeVarying(true);
                 for (var sk = 0; sk < p.scaleKeys.length; sk++) {
-                  scaleProperty.addKey(p.scaleKeys[sk][0]);
-                  scaleProperty.setValueAtKey(p.scaleKeys[sk][0], p.scaleKeys[sk][1], true);
+                  scaleProperty.addKey(keyBase + p.scaleKeys[sk][0]);
+                  scaleProperty.setValueAtKey(keyBase + p.scaleKeys[sk][0], p.scaleKeys[sk][1], true);
                 }
                 applied = scaleProperty.getKeys().length;
               } else {

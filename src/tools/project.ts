@@ -140,13 +140,18 @@ export function getProjectTools(bridgeOptions: BridgeOptions) {
             type: "string",
             description: "Sequence name or ID to make active",
           },
+          open_in_timeline: {
+            type: "boolean",
+            description: "Also open the sequence in a Timeline panel and bring it to the front (Project.openSequence)",
+          },
         },
         required: ["sequence_id"],
       },
-      handler: async (args: { sequence_id: string }) => {
+      handler: async (args: { sequence_id: string; open_in_timeline?: boolean }) => {
         const script = buildToolScript(`
           var seq = __findSequence("${escapeForExtendScript(args.sequence_id)}");
           if (!seq) return __error("Sequence not found: ${escapeForExtendScript(args.sequence_id)}");
+          ${args.open_in_timeline === true ? "try { app.project.openSequence(seq.sequenceID); } catch (eOpen) {}" : ""}
           app.project.activeSequence = seq;
           var active = __getCurrentActiveSequence();
           if (!active || String(active.sequenceID) !== String(seq.sequenceID)) {
